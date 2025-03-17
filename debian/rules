@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	./autogen.sh || autoreconf -fi
+	./configure --prefix=/usr
+
+override_dh_auto_build:
+	make
+
+override_dh_auto_install:
+	make install DESTDIR=$(CURDIR)/debian/azfilesauth
+
+override_dh_install:
+	dh_install --sourcedir=debian/azfilesauth
