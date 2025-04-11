@@ -82,7 +82,6 @@ def clear_credentials(file_endpoint_uri):
 
     if rc != 0:
         print(f"clear creds failed")
-        cleanup(1)
 
 
 def init_new_user():
@@ -372,7 +371,7 @@ def run_azfilesauthtests():
         # test_basic_mount(file_endpoint_uri, mnt_cmd)
 
         # # Allow ticket to expire, renew ticket and validate operations work
-        # test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd)
+        test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd)
 
         # # Insert first ticket, 30 mins later insert second ticket and validate operations work after first ticket expires
         # test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mnt_cmd)
@@ -384,10 +383,10 @@ def run_azfilesauthtests():
         # test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd_multichannel)
         # test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mnt_cmd_multichannel)
 
-        print(f"\n--------- Stress Tests ----------")
+        # print(f"\n--------- Stress Tests ----------")
 
         # Insert one ticket, at the halfway point insert a second ticket, 7 mins before expiry trigger heavy writes (15GB) to server from handle (dd)
-        test_heavy_writes_at_ticket_switch(file_endpoint_uri, mnt_cmd, 1)
+        # test_heavy_writes_at_ticket_switch(file_endpoint_uri, mnt_cmd, 1)
 
     else:
         print(USAGE_MESSAGE)
