@@ -664,36 +664,40 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     while (krb5_cc_next_cred(context, ccache, &cursor, &creds) == 0) {
         if (creds.server->data->data && std::string(creds.server->data->data, creds.server->data->length) == "cifs") {
             count++;
-            syslog(LOG_INFO, "Credential %d:", count);
-            syslog(LOG_INFO, "  Server: %s", std::string(creds.server->data->data, creds.server->data->length).c_str());
-            syslog(LOG_INFO, "  Client: %s", std::string(creds.client->data->data, creds.client->data->length).c_str());
-            syslog(LOG_INFO, "  Realm: %s", std::string(creds.server->realm.data, creds.server->realm.length).c_str());
-            syslog(LOG_INFO, "  Ticket flags: %d", creds.ticket_flags);
-            syslog(LOG_INFO, "  Ticket renew till: %d", creds.times.renew_till);
 
+            char *server_name = NULL;
+            krb5_error_code ret;
+
+            ret = krb5_unparse_name(context, creds.server, &server_name);
+            if (ret) {
+                syslog(LOG_ERR, "krb5_unparse_name failed: %s", krb5_get_error_message(context, ret));
+                goto out;
+            }
+            
             if (is_json) {
                 if (!first) {
                     json_output << ",\n"; // Add a comma between JSON objects
                 }
                 first = false;
                 json_output << "  {\n"
-                            << "    \"server\": \"" << std::string(creds.server->data->data, creds.server->data->length) << "\",\n"
-                            << "    \"client\": \"" << std::string(creds.client->data->data, creds.client->data->length) << "\",\n"
-                            << "    \"realm\": \"" << std::string(creds.server->realm.data, creds.server->realm.length) << "\",\n"
-                            << "    \"ticket_flags\": " << creds.ticket_flags << ",\n"
-                            << "    \"ticket_renew_till\": " << creds.times.renew_till << "\n"
-                            << "  }";
+                << "    \"server\": \"" << server_name << "\",\n"
+                << "    \"client\": \"" << std::string(creds.client->data->data, creds.client->data->length) << "\",\n"
+                << "    \"realm\": \"" << std::string(creds.server->realm.data, creds.server->realm.length) << "\",\n"
+                << "    \"ticket_flags\": " << creds.ticket_flags << ",\n"
+                << "    \"ticket_renew_till\": " << creds.times.renew_till << "\n"
+                << "  }";
             } else {
                 std::cout << "Credential " << count << ":" << std::endl;
-                std::cout << "  Server: " << std::string(creds.server->data->data, creds.server->data->length) << std::endl;
+                std::cout << "  Server: " << server_name << std::endl;
                 std::cout << "  Client: " << std::string(creds.client->data->data, creds.client->data->length) << std::endl;
                 std::cout << "  Realm: " << std::string(creds.server->realm.data, creds.server->realm.length) << std::endl;
                 std::cout << "  Ticket flags: " << creds.ticket_flags << std::endl;
                 std::cout << "  Ticket renew till: " << creds.times.renew_till << std::endl;
             }
+            krb5_free_unparsed_name(context, server_name);
         }
     }
-
+    
     if (is_json) {
         json_output << "\n]"; // End JSON array
         std::cout << json_output.str() << std::endl; // Print full JSON output

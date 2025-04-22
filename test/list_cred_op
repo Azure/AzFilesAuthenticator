@@ -4,13 +4,6 @@
     "client": "AzureFileClient@files.azure.storage.microsoft.com",
     "realm": "files.azure.storage.microsoft.com",
     "ticket_flags": 8388608,
-    "ticket_renew_till": 1741859034
-  },
-  {
-    "server": "cifs",
-    "client": "AzureFileClient@files.azure.storage.microsoft.com",
-    "realm": "files.azure.storage.microsoft.com",
-    "ticket_flags": 8388608,
-    "ticket_renew_till": 1741862334
+    "ticket_renew_till": 1743665420
   }
 ]
