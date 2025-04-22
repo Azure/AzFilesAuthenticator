@@ -83,12 +83,8 @@ def init_new_user():
     return new_user_uid
 
 
-def get_oauth_token(file_endpoint_uri, client_id):
-    # check if file URI ends with '/', if it does, remove it
-    if file_endpoint_uri.endswith('/'):
-        file_endpoint_uri = file_endpoint_uri[:-1]
-
-    url = f"http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource={file_endpoint_uri}/&client_id={client_id}"
+def get_oauth_token(client_id):
+    url = f"http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com&client_id={client_id}"
     headers = {"Metadata": "true"}
 
     try:
@@ -199,7 +195,7 @@ def run_azfilesauthmanager():
 
         if is_client_id:
             client_id = sys.argv[4]
-            oauth_token = get_oauth_token(file_endpoint_uri, client_id)
+            oauth_token = get_oauth_token(client_id)
         else:
             oauth_token = sys.argv[3]
 
