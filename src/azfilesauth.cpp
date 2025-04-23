@@ -618,6 +618,8 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* KRB5_CC_NAME;
+    char *server_name = NULL;
+    krb5_error_code ret;
 
     // Use read_config_value to get the value of KRB5_CC_NAME
     krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
@@ -664,9 +666,6 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     while (krb5_cc_next_cred(context, ccache, &cursor, &creds) == 0) {
         if (creds.server->data->data && std::string(creds.server->data->data, creds.server->data->length) == "cifs") {
             count++;
-
-            char *server_name = NULL;
-            krb5_error_code ret;
 
             ret = krb5_unparse_name(context, creds.server, &server_name);
             if (ret) {
