@@ -54,6 +54,19 @@ std::string read_config_value(const std::string& key) {
     return ""; // Key not found
 }
 
+std::string parse_principal_into_string(const krb5_principal principal) {
+    std::string principal_str;
+    for (int i = 0; i < principal->length; i++) {
+        if (i > 0) {
+            principal_str += "/";
+        }
+        principal_str += std::string(principal->data[i].data, principal->data[i].length);
+    }
+    principal_str += "@";
+    principal_str += std::string(principal->realm.data, principal->realm.length);
+    return principal_str;
+}
+
 // Parses the value associated with a given key from a JSON-formatted string.
 std::string parseValue(const std::string& json, const std::string& key) {
     std::string keyWithQuotes = "\"" + key + "\":\"";
@@ -606,7 +619,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
         goto out;
     }
 
-    syslog(LOG_INFO, "Removed creds for service principal: %s", std::string(principal->data->data, principal->data->length).c_str());
+    syslog(LOG_INFO, "Removed creds for service principal: %s", parse_principal_into_string(principal).c_str());
 
     closelog();
     return 0;
