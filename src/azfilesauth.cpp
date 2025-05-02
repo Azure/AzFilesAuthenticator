@@ -12,6 +12,8 @@
 #include <unistd.h>
 #include <syslog.h>
 
+int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
+
 // Check if a file exists
 bool fileExists(const std::string& filename) {
     return access(filename.c_str(), F_OK) == 0;
@@ -50,6 +52,19 @@ std::string read_config_value(const std::string& key) {
     
     closelog();
     return ""; // Key not found
+}
+
+std::string parse_principal_into_string(const krb5_principal principal) {
+    std::string principal_str;
+    for (int i = 0; i < principal->length; i++) {
+        if (i > 0) {
+            principal_str += "/";
+        }
+        principal_str += std::string(principal->data[i].data, principal->data[i].length);
+    }
+    principal_str += "@";
+    principal_str += std::string(principal->realm.data, principal->realm.length);
+    return principal_str;
 }
 
 // Parses the value associated with a given key from a JSON-formatted string.
@@ -319,7 +334,8 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
 
 
 // Inserts a Kerberos credential into the credential cache.
-int smb_insert_credential(const char* krb_ticket_data, size_t krb_ticket_size, uid_t user_uid) {
+int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_ticket_data,
+		size_t krb_ticket_size, uid_t user_uid) {
     krb5_context context = NULL;
     krb5_error_code ret;
     krb5_auth_context auth_context = NULL;
@@ -415,6 +431,8 @@ int smb_insert_credential(const char* krb_ticket_data, size_t krb_ticket_size, u
         goto out;
     }
 
+    //clear credentials from cache before inserting new one for same file uri
+    smb_clear_credential(file_endpoint_uri, user_uid);
     // Process the decoded credentials
     for (int i = 0; decoded_cred[i] != NULL; i++) {
         syslog(LOG_INFO, "Ticket %d:", i);
@@ -512,7 +530,7 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
     decoded_pair = decodeBase64(krb_ticket);
     decoded = decoded_pair.first;
     size = decoded_pair.second;
-    rc = smb_insert_credential(decoded.c_str(), size, user_uid);
+    rc = smb_insert_credential(file_endpoint_uri, decoded.c_str(), size, user_uid);
 
     syslog(LOG_INFO, "insert credential rc: %d", rc);
 
@@ -538,11 +556,23 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     std::string krb5_cc_name_construct;
     const char* KRB5_CC_NAME;
 
+
+    std::string endpoint_uri_str(file_endpoint_uri);
+    if (endpoint_uri_str.substr(0, 8) == "https://") {
+        endpoint_uri_str.replace(0, 8, "cifs/");
+    } else {
+        syslog(LOG_ERR, "file_endpoint_uri is not prefixed with 'https://'. file_endpoint_uri provided: %s", file_endpoint_uri.c_str());
+	std::cerr << "file_endpoint_uri is not prefixed with 'https://'. Provided: " << file_endpoint_uri << std::endl;
+        return -1;
+    }
+
     // Use read_config_value to get the value of KRB5_CC_NAME
     krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
 
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
+
+    syslog(LOG_INFO,"Clear credential for %s", endpoint_uri_str.c_str());
 
     if (krb5_cc_name_str.empty()) {
         syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
@@ -553,7 +583,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     }
     KRB5_CC_NAME = krb5_cc_name_construct.c_str();
 
-    if (&file_endpoint_uri == nullptr || file_endpoint_uri.empty()) {
+    if (&endpoint_uri_str == nullptr || endpoint_uri_str.empty()) {
         syslog(LOG_ERR, "file_endpoint_uri is empty");
         goto out;
     }
@@ -574,7 +604,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
         goto out;
     }
 
-    krb_rc = krb5_parse_name(context, file_endpoint_uri.c_str(), &principal);
+    krb_rc = krb5_parse_name(context, endpoint_uri_str.c_str(), &principal);
     if (krb_rc) {
         syslog(LOG_ERR, "Failed to parse principal: %s", krb5_get_error_message(context, krb_rc));
         goto out;
@@ -589,7 +619,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
         goto out;
     }
 
-    syslog(LOG_INFO, "Removed creds for service principal: %s", std::string(principal->data->data, principal->data->length).c_str());
+    syslog(LOG_INFO, "Removed creds for service principal: %s", parse_principal_into_string(principal).c_str());
 
     closelog();
     return 0;
@@ -755,16 +785,7 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
         return -1;
     }
 
-    std::string endpoint_uri_str(file_endpoint_uri);
-    if (endpoint_uri_str.substr(0, 8) == "https://") {
-        endpoint_uri_str.replace(0, 8, "cifs/");
-    } else {
-        syslog(LOG_ERR, "file_endpoint_uri is not prefixed with 'https://'. file_endpoint_uri provided: %s", file_endpoint_uri);
-        printf("file_endpoint_uri is not prefixed with 'https://'. file_endpoint_uri provided: %s\n", file_endpoint_uri);
-        return -1;
-    }
-
-    return smb_clear_credential(endpoint_uri_str, user_uid);
+    return smb_clear_credential(file_endpoint_uri, user_uid);
 }
 
 void extern_smb_list_credential(bool is_json) {
