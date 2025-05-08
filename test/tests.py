@@ -367,8 +367,8 @@ def run_azfilesauthtests():
         mnt_cmd = f"sudo mount -t cifs {storage_acc}/{config['SHARE_NAME']} {config['MOUNT_PATH']} -o sec=krb5,cruid={config['CRUID']}"
         mnt_cmd_multichannel = f"sudo mount -t cifs {storage_acc}/{config['SHARE_NAME']} {config['MOUNT_PATH']} -o sec=krb5,cruid={config['CRUID']},multichannel,max_channels=4"
 
-        # # Insert Ticket to credential cache and validate mount works
-        # test_basic_mount(file_endpoint_uri, mnt_cmd)
+        # Insert Ticket to credential cache and validate mount works
+        test_basic_mount(file_endpoint_uri, mnt_cmd)
 
         # # Allow ticket to expire, renew ticket and validate operations work
         test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd)
