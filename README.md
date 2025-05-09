@@ -348,9 +348,11 @@ If you encounter issues, you can debug the main library and command-line tool by
 
 - ### .deb package
 
-  The required setup is already present in the `.debian` directory:
-  
-  1. debian/control (Package metadata)
+  The required setup is already present in the `.debian` directory. From the root of the repo, run the following:
+  ```bash
+  sudo dpkg-buildpackage -us -uc
+  ```
+  The `.deb` package will be then packaged and be located one directory above the current directory.
   
 
 ## License
