@@ -370,22 +370,26 @@ def run_azfilesauthtests():
         # Insert Ticket to credential cache and validate mount works
         test_basic_mount(file_endpoint_uri, mnt_cmd)
 
-        # # Allow ticket to expire, renew ticket and validate operations work
+        # Allow ticket to expire, renew ticket and validate operations work
         test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd)
 
-        # # Insert first ticket, 30 mins later insert second ticket and validate operations work after first ticket expires
-        # test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mnt_cmd)
+        # Insert first ticket, 30 mins later insert second ticket and validate operations work after first ticket expires
+        test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mnt_cmd)
 
-        # # Test multichannel
-        # print(f"\n---------- Multichannel ----------")
+        # Test multichannel
+        print(f"\n---------- Multichannel ----------")
         
-        # test_basic_mount(file_endpoint_uri, mnt_cmd_multichannel)
-        # test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd_multichannel)
-        # test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mnt_cmd_multichannel)
+        test_basic_mount(file_endpoint_uri, mnt_cmd_multichannel)
+        test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd_multichannel)
+        test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mnt_cmd_multichannel)
+
+
+        ##### PENDING IMPLEMENTATION #####
 
         # print(f"\n--------- Stress Tests ----------")
 
         # Insert one ticket, at the halfway point insert a second ticket, 7 mins before expiry trigger heavy writes (15GB) to server from handle (dd)
+        # uses the external bash script in this directory 
         # test_heavy_writes_at_ticket_switch(file_endpoint_uri, mnt_cmd, 1)
 
     else:
