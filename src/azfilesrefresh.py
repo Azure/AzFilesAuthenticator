@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+
+import azfilesauthmanager
+import subprocess
+import json
+import time
+import signal
+import sys
+import logging
+from azfiles_get_token import get_oauth_token
+import re
+
+# Constants
+SLEEP_TIME = 60
+RUNNING = True
+
+# Configure Logging
+logging.basicConfig(
+    filename="/var/log/azfilesrefresh.log",
+    filemode='a',
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO
+)
+
+def log_status(message):
+    logging.info(message)
+
+def log_error(message):
+    logging.error(message)
+
+def log_verbose(message):
+    logging.debug(message)
+
+# Graceful shutdown handler
+def handle_shutdown(signum, frame):
+    global RUNNING
+    log_status(f"Received signal {signum}. Shutting down gracefully.")
+    RUNNING = False
+    exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, handle_shutdown)
+signal.signal(signal.SIGINT, handle_shutdown)
+
+def get_tickets():
+    try:
+        result = subprocess.run(["sudo", "azfilesauthmanager", "list", "--json"],
+                                check=True, capture_output=True)
+        result_raw = result.stdout.decode('utf-8')
+        tickets = json.loads(result_raw)
+        return tickets
+    except Exception as e:
+        log_error(f"Error getting tickets: {e}")
+        return []
+
+def is_expiring(ticket):
+    try:
+        valid_till = int(ticket['ticket_renew_till'])
+        current_time = int(time.time())
+        return (current_time + 300) >= valid_till
+    except Exception as e:
+        log_error(f"Failed to check ticket expiration: {e}")
+        return False
+
+def get_endpoint_from_principal(principal_string: str):
+    index = principal_string.find('@')
+    prefixes = ["cifs/", "https://"]
+    for prefix in prefixes:
+        if principal_string.startswith(prefix):
+            return principal_string[len(prefix): index]
+    log_error(f"Invalid principal string: {principal_string}")
+    return ""
+
+
+def get_mount_options():
+    result = subprocess.run(['mount', '-t', 'cifs'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    mount_output = result.stdout.decode('utf-8')
+
+    # Regex to find endpoint and username
+    pattern = re.compile(r'//([^/\s]+).*?username=([^,\s]+)')
+    id_map = {}
+    for endpoint, client_id in pattern.findall(mount_output):
+        id_map[endpoint] = client_id
+
+    return id_map
+
+    
+
+def get_client_id(file_endpoint_uri):
+    id_map = get_mount_options()
+    return id_map.get(file_endpoint_uri)
+
+
+    try:
+        with open("file_mapping.txt", "r") as f:
+            for line in f:
+                if file_endpoint_uri in line:
+                    client_id = line.strip().split()[0]
+                    return client_id
+        log_error(f"Client id not found for endpoint: {file_endpoint_uri}")
+        return None
+    except FileNotFoundError:
+        log_error("file_mapping.txt not found.")
+        return None
+    except Exception as e:
+        log_error(f"Error reading file_mapping.txt: {e}")
+        return None
+
+def refresh_ticket(ticket):
+    try:
+        endpoint = get_endpoint_from_principal(ticket['server'])
+        client_id = get_client_id(endpoint)
+        if client_id is None:
+            log_error(f"Skipping refresh. Client id not found for endpoint: {endpoint}")
+            return
+        oauth_token = get_oauth_token(client_id)
+        result = azfilesauthmanager.azfiles_set_oauth("https://" + endpoint, oauth_token)
+        log_status(f"Ticket for {endpoint} refreshed: {result}")
+    except Exception as e:
+        log_error(f"Error refreshing ticket: {e}")
+
+def start_daemon():
+    global RUNNING
+    log_status("AZ Files Refresh Daemon started.")
+    while RUNNING:
+        tickets = get_tickets()
+        log_status("Checking for expiring tickets...")
+        for ticket in tickets:
+            if is_expiring(ticket):
+                refresh_ticket(ticket)
+        log_status("Done checking. Sleeping...")
+        time.sleep(SLEEP_TIME)
+    log_status("Daemon exited.")
+
+if __name__ == "__main__":
+    start_daemon()
+    print(get_mount_options())
