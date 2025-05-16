@@ -648,6 +648,13 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
 
     out:
     printf("Error clearing credential, check /var/log/syslog for more information.\n");
+
+    if(cache_principal) {
+        krb5_free_principal(context, cache_principal);
+    }
+    if (principal) {
+        krb5_free_principal(context, principal);
+    }
     if (context) {
         krb5_free_context(context);
     }
