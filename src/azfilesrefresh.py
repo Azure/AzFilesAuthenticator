@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 
-import azfilesauthmanager
+from azfilesauth import azfiles_set_oauth, get_oauth_token
 import subprocess
+import os
 import json
 import time
 import signal
 import sys
 import logging
-from azfiles_get_token import get_oauth_token
 import re
 
 # Constants
-SLEEP_TIME = 60
+SECONDS = 1
+MINUTES = 60 * SECONDS
+
+SLEEP_TIME = 60 * SECONDS
+REFRESH_BEFORE_EXPIRY = 5 * MINUTES 
 RUNNING = True
 
 # Configure Logging
@@ -49,6 +53,10 @@ def get_tickets():
         result_raw = result.stdout.decode('utf-8')
         tickets = json.loads(result_raw)
         return tickets
+    except subprocess.CalledProcessError as e:
+        stderr_output = e.stderr.decode('utf-8') if e.stderr else "No stderr output"
+        log_error(f"Error getting tickets: {e}. stderr: {stderr_output}")
+        return []
     except Exception as e:
         log_error(f"Error getting tickets: {e}")
         return []
@@ -57,7 +65,7 @@ def is_expiring(ticket):
     try:
         valid_till = int(ticket['ticket_renew_till'])
         current_time = int(time.time())
-        return (current_time + 300) >= valid_till
+        return (current_time + REFRESH_BEFORE_EXPIRY + SLEEP_TIME) >= valid_till
     except Exception as e:
         log_error(f"Failed to check ticket expiration: {e}")
         return False
@@ -87,9 +95,14 @@ def get_mount_options():
     
 
 def get_client_id(file_endpoint_uri):
-    id_map = get_mount_options()
-    return id_map.get(file_endpoint_uri)
+    id_map = None
+    try:
+        id_map = get_mount_options()
+        return id_map.get(file_endpoint_uri)
+    except Exception as e:
+        log_error("Error getting mount options", e)
 
+    return
 
     try:
         with open("file_mapping.txt", "r") as f:
@@ -111,10 +124,11 @@ def refresh_ticket(ticket):
         endpoint = get_endpoint_from_principal(ticket['server'])
         client_id = get_client_id(endpoint)
         if client_id is None:
-            log_error(f"Skipping refresh. Client id not found for endpoint: {endpoint}")
+            log_error(f"Skipping refresh. Client id or username not found for endpoint: {endpoint}")
             return
+        log_status(f"Refresh token for {endpoint} initiated")
         oauth_token = get_oauth_token(client_id)
-        result = azfilesauthmanager.azfiles_set_oauth("https://" + endpoint, oauth_token)
+        result = azfiles_set_oauth("https://" + endpoint, oauth_token)
         log_status(f"Ticket for {endpoint} refreshed: {result}")
     except Exception as e:
         log_error(f"Error refreshing ticket: {e}")
@@ -133,5 +147,8 @@ def start_daemon():
     log_status("Daemon exited.")
 
 if __name__ == "__main__":
+    if os.geteuid() != 0:
+        log_error(f"Script is not running as root. Please run as root")
+        exit(1)
     start_daemon()
-    print(get_mount_options())
+    # print(get_mount_options())

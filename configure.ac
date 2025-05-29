@@ -4,8 +4,10 @@ AM_INIT_AUTOMAKE([foreign])
 AC_PROG_CXX
 LT_INIT
 
-# Detect Python
-AM_PATH_PYTHON([3.6])  # Ensure at least Python 3.6 is available
+# Detect Python and get the correct site-packages directory
+AM_PATH_PYTHON([3.6])
+PYTHON_SITE_PKG=`$PYTHON -c "import sysconfig; print(sysconfig.get_path('stdlib'))"`
+AC_SUBST([PYTHON_SITE_PKG])
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT

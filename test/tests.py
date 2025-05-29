@@ -64,7 +64,7 @@ def list_credentials():
     credentials = json.loads(str(result.stdout))
 
     # select and return a list of all credentials where server: 'cifs'
-    credentials = [cred for cred in credentials if cred["server"] == "cifs"]
+    credentials = [cred for cred in credentials if cred["server"].startswith("cifs")]
     return credentials
 
 
