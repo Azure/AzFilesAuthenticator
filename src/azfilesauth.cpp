@@ -148,6 +148,19 @@ size_t write_header_callback(char *buffer, size_t size, size_t nitems, std::stri
     return total_size;
 }
 
+// Helper function to read timeout value from config or use default
+long get_timeout_from_config(const std::string& key, long default_value) {
+    std::string value_str = read_config_value(key);
+    if (!value_str.empty()) {
+        char* endptr = nullptr;
+        long val = strtol(value_str.c_str(), &endptr, 10);
+        if (endptr != value_str.c_str() && val > 0) {
+            return val;
+        }
+    }
+    return default_value;
+}
+
 // Retrieves a Kerberos service ticket from a specified resource URI using an OAuth token.
 int get_kerberos_service_ticket(const std::string& resource_uri,
                         const std::string& oauth_token,
@@ -209,6 +222,18 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
     curl_rc = curl_easy_setopt(curl, CURLOPT_URL, request_url.c_str());
     if (curl_rc != CURLE_OK) {
         syslog(LOG_ERR, "curl_easy_setopt(CURLOPT_URL) failed: %s", curl_easy_strerror(curl_rc));
+        goto out_curl;
+    }
+
+    // Set timeouts
+    curl_rc = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, get_timeout_from_config("CURL_CONNECT_TIMEOUT", 10L));
+    if (curl_rc != CURLE_OK) {
+        syslog(LOG_ERR, "curl_easy_setopt(CURLOPT_CONNECTTIMEOUT) failed: %s", curl_easy_strerror(curl_rc));
+        goto out_curl;
+    }
+    curl_rc = curl_easy_setopt(curl, CURLOPT_TIMEOUT, get_timeout_from_config("CURL_TOTAL_TIMEOUT", 30L));
+    if (curl_rc != CURLE_OK) {
+        syslog(LOG_ERR, "curl_easy_setopt(CURLOPT_TIMEOUT) failed: %s", curl_easy_strerror(curl_rc));
         goto out_curl;
     }
 
