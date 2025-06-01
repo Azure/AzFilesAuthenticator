@@ -555,10 +555,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* KRB5_CC_NAME;
-    krb5_principal cache_principal;
-    const krb5_data* realm_data;
-    std::string realm;
-    std::string service_principal;
+
 
     std::string endpoint_uri_str(file_endpoint_uri);
     if (endpoint_uri_str.substr(0, 8) == "https://") {
@@ -606,27 +603,8 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
         syslog(LOG_ERR, "krb5_cc_resolve() failed: %s", krb5_get_error_message(context, krb_rc));
         goto out;
     }
-   // Get the principal from the credential cache
-   krb_rc = krb5_cc_get_principal(context, ccache, &cache_principal);
-   if (krb_rc) {
-       syslog(LOG_ERR, "krb5_cc_get_principal() failed: %s", krb5_get_error_message(context, krb_rc));
-       goto out;
-   }
 
-   // Extract the REALM from the credential cache principal
-   realm_data = krb5_princ_realm(context, cache_principal);
-   if (realm_data == NULL) {
-       syslog(LOG_ERR, "Failed to get realm data from principal");
-       goto out;
-   }
-   realm = std::string(realm_data->data, realm_data->length);
-
-   // Compose the service principal using the endpoint and the extracted realm
-   service_principal = endpoint_uri_str + "@" + realm;
-   syslog(LOG_INFO, "Constructed service principal: %s", service_principal.c_str());
-
-    // Parse the service principal
-    krb_rc = krb5_parse_name(context, service_principal.c_str(), &principal);
+    krb_rc = krb5_parse_name(context, endpoint_uri_str.c_str(), &principal);
     if (krb_rc) {
         syslog(LOG_ERR, "Failed to parse principal: %s", krb5_get_error_message(context, krb_rc));
         goto out;
