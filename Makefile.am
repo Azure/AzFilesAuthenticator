@@ -17,13 +17,11 @@ bin_SCRIPTS = azfilesauthmanager azfilesrefresh
 # Create Python package directory
 pymoduledir = $(PYTHON_SITE_PKG)/azfilesauth
 pymodule_PYTHON = src/azfilesauthmanager.py 
-# src/azfiles_get_token.py
 
 # Create __init__.py to make the directory a Python package
 install-data-hook:
 	mkdir -p $(DESTDIR)$(pymoduledir)
 	echo "from .azfilesauthmanager import *" > $(DESTDIR)$(pymoduledir)/__init__.py
-	# echo "from .azfiles_get_token import get_oauth_token" >> $(DESTDIR)$(pymoduledir)/__init__.py
 
 # Create systemd service file
 systemddir = /etc/systemd/system
