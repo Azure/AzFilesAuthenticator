@@ -30,6 +30,7 @@ for path in library_paths:
     if os.path.exists(path):
         lib = ctypes.CDLL(path)
         found_path = True 
+        break
 
 if not found_path:
     print("Library libazfilesauth.so not found in /usr/local/lib or /usr/lib")
