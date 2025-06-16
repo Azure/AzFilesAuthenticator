@@ -44,7 +44,6 @@ fi
 %license %{_licensedir}/%{name}/LICENSE
 %doc README.md
 %{_libdir}/libazfilesauth.so*
-%{_libdir}/libazfilesauth.la
 %{_bindir}/azfilesauthmanager
 %{_bindir}/azfilesrefresh
 %{python3_sitelib}/azfilesauth/
