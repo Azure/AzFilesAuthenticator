@@ -36,7 +36,7 @@ azfilesrefresh: src/azfilesrefresh.py
 	cp $< $@
 	chmod +x $@
 
-EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py src/azfiles_get_token.py config/azfilesrefresh.service
+EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service
 CLEANFILES = azfilesauthmanager azfilesrefresh
 
 # ensure only one instance of service is running
