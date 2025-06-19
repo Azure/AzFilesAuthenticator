@@ -1,0 +1,225 @@
+trigger:
+- none
+
+pr:
+- none
+
+variables:
+- group: azfilesauth 
+
+
+stages:
+  - stage: BuildPackages
+    displayName: 'Build and Package DEB/RPM Artifacts'
+    jobs:
+    - job: Build DEB
+      displayName: 'Build DEB'
+      pool:
+        vmImage: 'ubuntu-24.04'
+
+        steps:
+          - checkout: self
+            path: AzFilesAuthenticator
+            displayName: 'Checkout Repository'
+
+          - script: |
+              echo "Building DEB package..."
+              chmod +x package-deb.sh
+              ./package-deb.sh
+            displayName: 'Build DEB Package'
+
+          - script: |
+              echo "Copying DEB package to artifacts..."
+              mkdir -p $(Build.ArtifactStagingDirectory)
+              cp ../PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)
+              echo "Listing Built Files..."
+              ls -R $(Build.ArtifactStagingDirectory)
+            displayName: 'Copy DEB Package to Artifacts'
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: 'azfilesauth-deb'
+
+    - job: Build RPM
+      displayName: 'Build RPM'
+      pool:
+        vmImage: 'fedora-latest'
+
+        steps:
+          - checkout: self
+            path: AzFilesAuthenticator
+            displayName: 'Checkout Repository'
+
+          - script: |
+              echo "Building RPM package..."
+              chmod +x package-rpm.sh
+              ./package-rpm.sh
+            displayName: 'Build RPM Package'
+
+          - script: |
+              echo "Copying RPM package to artifacts..."
+              mkdir -p $(Build.ArtifactStagingDirectory)
+              cp ../PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
+              echo "Listing Built Files..."
+              ls -R $(Build.ArtifactStagingDirectory)
+            displayName: 'Copy RPM Package to Artifacts'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish RPM Package'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: 'azfilesauth-rpm'
+
+
+  - stage: SignArtifacts
+    displayName: 'Sign Artifacts'
+    dependsOn: BuildPackages
+    condition: succeeded('BuildPackages')
+    jobs:
+      - job: SignArtifacts
+        timeoutInMinutes: 120
+
+        pool:
+          vmImage: 'ubuntu-22.04'
+
+        steps:
+          - checkout: none
+
+          # download artifacts that need to be published
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download DEB Artifacts'
+            inputs:
+              artifactName: 'azfilesauth-deb'
+              downloadPath: $(Build.ArtifactStagingDirectory)
+
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download RPM Artifacts'
+            inputs:
+              artifactName: 'azfilesauth-rpm'
+              downloadPath: $(Build.ArtifactStagingDirectory)
+
+          - script: |
+              sudo ls -lRt $(Build.ArtifactStagingDirectory)
+            displayName: 'List Artifacts'
+
+          - script: |
+              sudo apt -y update
+              wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+              sudo dpkg -i packages-microsoft-prod.deb
+              sudo apt update
+              sudo apt install apt-transport-https -y
+              sudo apt install dotnet-sdk-9.0 -y
+            displayName: "Update dependencies"
+          
+          - task: EsrpCodeSigning@5
+            displayName: 'ESRP CodeSigning MI DEB'
+            inputs:
+              ConnectedServiceName: 'AzFilesAuthenticator'
+              AppRegistrationClientId: $(AppRegistrationClientId)
+              AppRegistrationTenantId: $(AppRegistrationTenantId)
+
+              UseMSIAuthentication: true
+              AuthAKVName: $(AuthAKVName)
+              AuthSignCertName: $(AuthSignCertName)
+
+              FolderPath: $(Build.ArtifactStagingDirectory)/azfilesauth-deb
+              Pattern: '*.deb'
+              SessionTimeout: 90
+              ServiceEndpointUrl: 'https://api.esrp.microsoft.com/api/v2'
+              MaxConcurrency: 25
+              signConfigType: inlineSignParams
+              VerboseLogin: true
+              inlineOperation: |
+                [
+                {
+                  "KeyCode": "CP-450779-Pgp",
+                  "OperationCode": "LinuxSign",
+                  "ToolName": "sign",
+                  "ToolVersion": "1.0",
+                  "Parameters": {}
+                }
+                ]
+
+          - task: EsrpCodeSigning@5
+            displayName: 'ESRP CodeSigning MI RPM'
+            inputs:
+              ConnectedServiceName: 'AzFilesAuthenticator'
+              AppRegistrationClientId: $(AppRegistrationClientId)
+              AppRegistrationTenantId: $(AppRegistrationTenantId)
+
+              UseMSIAuthentication: true
+              AuthAKVName: $(AuthAKVName)
+              AuthSignCertName: $(AuthSignCertName)
+
+              FolderPath: $(Build.ArtifactStagingDirectory)/azfilesauth-rpm
+              Pattern: '*.rpm'
+              SessionTimeout: 90
+              ServiceEndpointUrl: 'https://api.esrp.microsoft.com/api/v2'
+              MaxConcurrency: 25
+              signConfigType: inlineSignParams
+              VerboseLogin: true
+              inlineOperation: |
+                [
+                {
+                  "KeyCode": "CP-450779-Pgp",
+                  "OperationCode": "LinuxSign",
+                  "ToolName": "sign",
+                  "ToolVersion": "1.0",
+                  "Parameters": {}
+                }
+                ]
+
+          - script: |
+              chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
+              chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
+              cp azfilesauth-deb/*.deb $(Build.ArtifactStagingDirectory)/signed
+              cp azfilesauth-rpm/*.rpm $(Build.ArtifactStagingDirectory)/signed
+            displayName: 'Prepare Signed Artifacts'
+          
+          - script: |
+              echo "Listing Signed Artifacts..."
+              ls -R $(Build.ArtifactStagingDirectory)/signed/
+            displayName: 'List Signed Artifacts'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Signed Artifacts'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
+              artifactName: 'azfilesauth-signed'
+
+  - stage: ReleasePackages 
+    dependsOn: SignArtifacts
+    condition: succeeded('SignArtifacts')
+    displayName: 'Publish Packages to PMC'
+    jobs:
+    - job: ReleasePackages 
+      timeoutInMinutes: 120
+    
+      pool:
+        vmImage: 'ubuntu-22.04'
+
+      variables:
+          - name: root_dir
+            value: '$(System.DefaultWorkingDirectory)'
+
+      steps:
+        - checkout: none
+
+        - task: PipAuthenticate@1
+          inputs:
+            artifactFeeds: 'One/AzFilesAuthenticator'
+
+        - script: pip install pmc-cli
+          displayName: 'Install pmc-cli'
+
+        - task: DownloadBuildArtifacts@0
+          displayName: 'Download Signed Artifacts'
+          inputs:
+            artifactName: 'azfilesauth-signed'
+            downloadPath: $(Build.ArtifactStagingDirectory)
+          
+        - script: |
+            echo "Listing Signed Artifacts..."
+            ls -R $(Build.ArtifactStagingDirectory)/azfilesauth-signed/
+          displayName: 'List Signed Artifacts'

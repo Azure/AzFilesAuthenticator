@@ -1,0 +1,17 @@
+[Unit]
+Description=Azure Files Refresh Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/azfilesrefresh
+Restart=on-failure
+User=root
+Group=root
+roup=root
+
+# ensure only one instance of service is running
+PIDFile=/run/azfilesrefresh.pid
+
+[Install]
+WantedBy=multi-user.target
+

@@ -782,12 +782,16 @@ int extern_smb_set_credential_oauth_token(char* file_endpoint_uri,
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
-    if (setuid(user_uid) != 0) {
+    uid_t prev_uid = geteuid();
+    if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         return -1;
     }
     
-    return smb_set_credential_oauth_token(file_endpoint_uri, oauth_token, credential_expires_in_seconds, user_uid);
+    int rc = smb_set_credential_oauth_token(file_endpoint_uri, oauth_token, credential_expires_in_seconds, user_uid);
+    seteuid(prev_uid);
+
+    return rc;
 }
 
 int extern_smb_clear_credential(char* file_endpoint_uri) {
@@ -802,7 +806,8 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
-    if (setuid(user_uid) != 0) {
+    uid_t prev_uid = geteuid();
+    if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         printf("Failed to switch to user UID %d: %s\n", user_uid, strerror(errno));
         return -1;
@@ -814,7 +819,10 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
         return -1;
     }
 
-    return smb_clear_credential(file_endpoint_uri, user_uid);
+    int rc = smb_clear_credential(file_endpoint_uri, user_uid);
+    seteuid(prev_uid);
+
+    return rc;
 }
 
 void extern_smb_list_credential(bool is_json) {
@@ -829,11 +837,13 @@ void extern_smb_list_credential(bool is_json) {
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
-    if (setuid(user_uid) != 0) {
+    uid_t prev_uid = geteuid();
+    if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         printf("Failed to switch to user UID %d: %s\n", user_uid, strerror(errno));
         return;
     }
 
     smb_list_credential(is_json, user_uid);
+    seteuid(prev_uid);
 }

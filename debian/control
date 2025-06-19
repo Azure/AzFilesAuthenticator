@@ -7,6 +7,6 @@ Standards-Version: 4.6.0
 
 Package: azfilesauth
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, python3 (>= 3.6)
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3 (>= 3.6), python3-requests
 Description: Authentication utility for Azure Files with Kerberos
  A utility to handle Kerberos-based authentication for Azure Files, including a shared library and a Python manager script.

@@ -18,11 +18,21 @@ Usage:
         azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
         azfilesauthmanager clear <file_endpoint_uri>
 """
-if os.path.exists('/usr/lib/libazfilesauth.so'):
-    lib = ctypes.CDLL('/usr/lib/libazfilesauth.so')
-elif os.path.exists('/usr/local/lib/libazfilesauth.so'):
-    lib = ctypes.CDLL('/usr/local/lib/libazfilesauth.so')
-else:
+
+library_paths = [
+    '/usr/lib/libazfilesauth.so',
+    '/usr/lib64/libazfilesauth.so',
+    '/usr/local/lib/libazfilesauth.so'
+]
+
+found_path = False
+for path in library_paths:
+    if os.path.exists(path):
+        lib = ctypes.CDLL(path)
+        found_path = True 
+        break
+
+if not found_path:
     print("Library libazfilesauth.so not found in /usr/local/lib or /usr/lib")
     sys.exit(1)
 

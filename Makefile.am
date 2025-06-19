@@ -12,12 +12,31 @@ config_DATA = config/config.yaml
 
 # Python Script Installation
 bindir = $(prefix)/bin
-bin_SCRIPTS = azfilesauthmanager
+bin_SCRIPTS = azfilesauthmanager azfilesrefresh
 
-# Ensure it is installed without .py
+# Create Python package directory
+pymoduledir = $(PYTHON_SITE_PKG)/azfilesauth
+pymodule_PYTHON = src/azfilesauthmanager.py 
+
+# Create __init__.py to make the directory a Python package
+install-data-hook:
+	mkdir -p $(DESTDIR)$(pymoduledir)
+	echo "from .azfilesauthmanager import *" > $(DESTDIR)$(pymoduledir)/__init__.py
+
+# Create systemd service file
+systemddir = /etc/systemd/system
+systemd_DATA = src/azfilesrefresh.service
+
+# Ensure scripts are installed without .py extension
 azfilesauthmanager: src/azfilesauthmanager.py
 	cp $< $@
 	chmod +x $@
 
-EXTRA_DIST = src/azfilesauthmanager.py
-CLEANFILES = azfilesauthmanager
+azfilesrefresh: src/azfilesrefresh.py
+	cp $< $@
+	chmod +x $@
+
+EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service
+CLEANFILES = azfilesauthmanager azfilesrefresh
+
+# ensure only one instance of service is running
