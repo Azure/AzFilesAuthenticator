@@ -83,7 +83,6 @@ def get_endpoint_from_principal(principal_string: str):
     log_error(f"Invalid principal string: {principal_string}")
     return ""
 
-
 def get_mount_options():
     result = subprocess.run(['mount', '-t', 'cifs'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     mount_output = result.stdout.decode('utf-8')
@@ -96,32 +95,15 @@ def get_mount_options():
 
     return id_map
 
-    
-
 def get_client_id(file_endpoint_uri):
     id_map = None
     try:
         id_map = get_mount_options()
         return id_map.get(file_endpoint_uri)
     except Exception as e:
-        log_error("Error getting mount options", e)
+        log_error(f"Error getting mount options {e}")
 
     return
-
-    try:
-        with open("file_mapping.txt", "r") as f:
-            for line in f:
-                if file_endpoint_uri in line:
-                    client_id = line.strip().split()[0]
-                    return client_id
-        log_error(f"Client id not found for endpoint: {file_endpoint_uri}")
-        return None
-    except FileNotFoundError:
-        log_error("file_mapping.txt not found.")
-        return None
-    except Exception as e:
-        log_error(f"Error reading file_mapping.txt: {e}")
-        return None
 
 def refresh_ticket(ticket):
     try:
@@ -133,7 +115,7 @@ def refresh_ticket(ticket):
         log_status(f"Refresh token for {endpoint} initiated")
         oauth_token = get_oauth_token(client_id)
         result = azfiles_set_oauth("https://" + endpoint, oauth_token)
-        log_status(f"Ticket for {endpoint} refreshed: {result}")
+        log_status(f"Ticket for {endpoint} refreshed")
     except Exception as e:
         log_error(f"Error refreshing ticket: {e}")
 

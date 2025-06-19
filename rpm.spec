@@ -57,7 +57,7 @@ fi
 %systemd_preun azfilesrefresh.service
 
 %postun
-%systemd_postun_with_restart azfilesrefresh.serviceuy
+%systemd_postun_with_restart azfilesrefresh.service
 
 %changelog
 * Thu Feb 20 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
