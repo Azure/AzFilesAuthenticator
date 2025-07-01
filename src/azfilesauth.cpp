@@ -260,6 +260,10 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
     headers = curl_slist_append(headers, ACCEPT_TYPES);         // Accept: */*, same as WINHTTP_DEFAULT_ACCEPT_TYPES
     headers = curl_slist_append(headers, API_VERSION);          // Setting API version
     headers = curl_slist_append(headers, auth_header.c_str());  // Setting authorization header
+
+    headers = curl_slist_append(headers, "Expect:");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
     
     // Get current time
     std::time(&rawtime);
