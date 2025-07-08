@@ -10,6 +10,8 @@
 #define AUTHORIZATION_HEADER "Authorization: Bearer "   // space to add oauth token
 #define X_MS_DATE_HEADER "x-ms-date: "                  // space to add date
 #define KRB5_CLIENT_PRINCIPAL "AzureFileClient"         // Server-side hard coded client principal
+#define DEFAULT_CURL_CONNECT_TIMEOUT 10L
+#define DEFAULT_CURL_TOTAL_TIMEOUT 30L
 
 #define CONFIG_FILE_PATH "/etc/azfilesauth/config.yaml"
 
