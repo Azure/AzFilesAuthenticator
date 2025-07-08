@@ -226,12 +226,12 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
     }
 
     // Set timeouts
-    curl_rc = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, get_timeout_from_config("CURL_CONNECT_TIMEOUT", 10L));
+    curl_rc = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, get_timeout_from_config("CURL_CONNECT_TIMEOUT", DEFAULT_CURL_CONNECT_TIMEOUT));
     if (curl_rc != CURLE_OK) {
         syslog(LOG_ERR, "curl_easy_setopt(CURLOPT_CONNECTTIMEOUT) failed: %s", curl_easy_strerror(curl_rc));
         goto out_curl;
     }
-    curl_rc = curl_easy_setopt(curl, CURLOPT_TIMEOUT, get_timeout_from_config("CURL_TOTAL_TIMEOUT", 30L));
+    curl_rc = curl_easy_setopt(curl, CURLOPT_TIMEOUT, get_timeout_from_config("CURL_TOTAL_TIMEOUT", DEFAULT_CURL_TOTAL_TIMEOUT));
     if (curl_rc != CURLE_OK) {
         syslog(LOG_ERR, "curl_easy_setopt(CURLOPT_TIMEOUT) failed: %s", curl_easy_strerror(curl_rc));
         goto out_curl;
