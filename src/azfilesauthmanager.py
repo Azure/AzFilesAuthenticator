@@ -108,8 +108,7 @@ def get_oauth_token(client_id):
     
     except Exception as e:
         print(f"Error fetching OAuth token: {e}")
-        sys.exit(1)
-    
+        return None
 
 def azfiles_set_oauth(file_endpoint_uri, oauth_token):
 
@@ -206,6 +205,8 @@ def run_azfilesauthmanager():
         if is_client_id:
             client_id = sys.argv[4]
             oauth_token = get_oauth_token(client_id)
+            if oauth_token is None:
+                sys.exit(1)
         else:
             oauth_token = sys.argv[3]
 

@@ -114,6 +114,8 @@ def refresh_ticket(ticket):
             return
         log_status(f"Refresh token for {endpoint} initiated")
         oauth_token = get_oauth_token(client_id)
+        if oauth_token is None:
+            raise Exception(f"Unable to obtain OAuth token for {endpoint}")
         result = azfiles_set_oauth("https://" + endpoint, oauth_token)
         log_status(f"Ticket for {endpoint} refreshed")
     except Exception as e:
