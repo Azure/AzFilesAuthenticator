@@ -19,7 +19,9 @@ setup_rpmbuild_tree() {
 # Check if the system is Debian/apt-based
 if [ -x "$(command -v apt-get)" ] || [ -f /etc/debian_version ]; then
     # Debian/Ubuntu system
+    sudo apt-get update
     sudo apt-get install rpm -y
+    sudo apt-get install -y git autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev debhelper-compat
     setup_rpmbuild_tree
 else
     # Assuming it's an RPM-based system (Fedora, CentOS, RHEL, etc.)
@@ -34,4 +36,5 @@ git archive --format=tar --prefix=azfilesauth-1.0/ HEAD -- . ':!debian' | gzip >
 cp rpm.spec ~/rpmbuild/SPECS/
 rpmbuild -ba ~/rpmbuild/SPECS/rpm.spec
 
+mkdir -p PACKAGES/rpm
 cp ~/rpmbuild/RPMS/x86_64/azfilesauth*.rpm PACKAGES/rpm/
