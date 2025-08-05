@@ -41,7 +41,7 @@ stages:
     - job: BuildRPM
       displayName: 'Build RPM'
       pool:
-        vmImage: 'fedora-latest'
+        vmImage: 'ubuntu-latest'
 
         steps:
           - checkout: self
@@ -49,6 +49,7 @@ stages:
             displayName: 'Checkout Repository'
 
           - script: |
+              sudo apt-get install rpm -y
               echo "Building RPM package..."
               chmod +x package-rpm.sh
               ./package-rpm.sh
