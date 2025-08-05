@@ -36,7 +36,7 @@ stages:
           - task: PublishBuildArtifacts@1
             inputs:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-              artifactName: 'azfilesauth-deb'
+              ArtifactName: 'azfilesauth-deb'
 
     - job: BuildRPM
       displayName: 'Build RPM'
@@ -67,7 +67,7 @@ stages:
             displayName: 'Publish RPM Package'
             inputs:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-              artifactName: 'azfilesauth-rpm'
+              ArtifactName: 'azfilesauth-rpm'
 
 
   - stage: SignArtifacts
@@ -88,13 +88,13 @@ stages:
           - task: DownloadBuildArtifacts@1
             displayName: 'Download DEB Artifacts'
             inputs:
-              artifactName: 'azfilesauth-deb'
+              ArtifactName: 'azfilesauth-deb'
               downloadPath: $(Build.ArtifactStagingDirectory)
 
           - task: DownloadBuildArtifacts@1
             displayName: 'Download RPM Artifacts'
             inputs:
-              artifactName: 'azfilesauth-rpm'
+              ArtifactName: 'azfilesauth-rpm'
               downloadPath: $(Build.ArtifactStagingDirectory)
 
           - script: |
@@ -184,6 +184,6 @@ stages:
             displayName: 'Publish Signed Artifacts'
             inputs:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
-              artifactName: 'azfilesauth-signed'
+              ArtifactName: 'azfilesauth-signed'
 
 
