@@ -28,7 +28,7 @@ stages:
         - script: |
             echo "Copying DEB package to artifacts..."
             mkdir -p $(Build.ArtifactStagingDirectory)
-            cp ../PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)
+            cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)
             echo "Listing Built Files..."
             ls -R $(Build.ArtifactStagingDirectory)
           displayName: 'Copy DEB Package to Artifacts'
@@ -58,7 +58,7 @@ stages:
         - script: |
             echo "Copying RPM package to artifacts..."
             mkdir -p $(Build.ArtifactStagingDirectory)
-            cp ../PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
+            cp PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
             echo "Listing Built Files..."
             ls -R $(Build.ArtifactStagingDirectory)
           displayName: 'Copy RPM Package to Artifacts'
