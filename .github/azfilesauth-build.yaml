@@ -14,60 +14,60 @@ stages:
       pool:
         vmImage: 'ubuntu-22.04'
 
-        steps:
-          - checkout: self
-            path: AzFilesAuthenticator
-            displayName: 'Checkout Repository'
+      steps:
+        - checkout: self
+          path: AzFilesAuthenticator
+          displayName: 'Checkout Repository'
 
-          - script: |
-              echo "Building DEB package..."
-              chmod +x package-deb.sh
-              ./package-deb.sh
-            displayName: 'Build DEB Package'
+        - script: |
+            echo "Building DEB package..."
+            chmod +x package-deb.sh
+            ./package-deb.sh
+          displayName: 'Build DEB Package'
 
-          - script: |
-              echo "Copying DEB package to artifacts..."
-              mkdir -p $(Build.ArtifactStagingDirectory)
-              cp ../PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)
-              echo "Listing Built Files..."
-              ls -R $(Build.ArtifactStagingDirectory)
-            displayName: 'Copy DEB Package to Artifacts'
+        - script: |
+            echo "Copying DEB package to artifacts..."
+            mkdir -p $(Build.ArtifactStagingDirectory)
+            cp ../PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)
+            echo "Listing Built Files..."
+            ls -R $(Build.ArtifactStagingDirectory)
+          displayName: 'Copy DEB Package to Artifacts'
 
-          - task: PublishBuildArtifacts@1
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-              ArtifactName: 'azfilesauth-deb'
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'azfilesauth-deb'
 
     - job: BuildRPM
       displayName: 'Build RPM'
       pool:
         vmImage: 'ubuntu-latest'
 
-        steps:
-          - checkout: self
-            path: AzFilesAuthenticator
-            displayName: 'Checkout Repository'
+      steps:
+        - checkout: self
+          path: AzFilesAuthenticator
+          displayName: 'Checkout Repository'
 
-          - script: |
-              sudo apt-get install rpm -y
-              echo "Building RPM package..."
-              chmod +x package-rpm.sh
-              ./package-rpm.sh
-            displayName: 'Build RPM Package'
+        - script: |
+            sudo apt-get install rpm -y
+            echo "Building RPM package..."
+            chmod +x package-rpm.sh
+            ./package-rpm.sh
+          displayName: 'Build RPM Package'
 
-          - script: |
-              echo "Copying RPM package to artifacts..."
-              mkdir -p $(Build.ArtifactStagingDirectory)
-              cp ../PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
-              echo "Listing Built Files..."
-              ls -R $(Build.ArtifactStagingDirectory)
-            displayName: 'Copy RPM Package to Artifacts'
+        - script: |
+            echo "Copying RPM package to artifacts..."
+            mkdir -p $(Build.ArtifactStagingDirectory)
+            cp ../PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
+            echo "Listing Built Files..."
+            ls -R $(Build.ArtifactStagingDirectory)
+          displayName: 'Copy RPM Package to Artifacts'
 
-          - task: PublishBuildArtifacts@1
-            displayName: 'Publish RPM Package'
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-              ArtifactName: 'azfilesauth-rpm'
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish RPM Package'
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'azfilesauth-rpm'
 
 
   - stage: SignArtifacts
