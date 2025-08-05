@@ -4,18 +4,15 @@ trigger:
 pr:
 - none
 
-variables:
-- group: azfilesauth 
-
 
 stages:
   - stage: BuildPackages
     displayName: 'Build and Package DEB/RPM Artifacts'
     jobs:
-    - job: Build DEB
+    - job: BuildDEB
       displayName: 'Build DEB'
       pool:
-        vmImage: 'ubuntu-24.04'
+        vmImage: 'ubuntu-22.04'
 
         steps:
           - checkout: self
@@ -41,7 +38,7 @@ stages:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)'
               artifactName: 'azfilesauth-deb'
 
-    - job: Build RPM
+    - job: BuildRPM
       displayName: 'Build RPM'
       pool:
         vmImage: 'fedora-latest'
@@ -115,7 +112,7 @@ stages:
           - task: EsrpCodeSigning@5
             displayName: 'ESRP CodeSigning MI DEB'
             inputs:
-              ConnectedServiceName: 'AzFilesAuthenticator'
+              ConnectedServiceName: 'AzFilesAuthenticator-wif'
               AppRegistrationClientId: $(AppRegistrationClientId)
               AppRegistrationTenantId: $(AppRegistrationTenantId)
 
@@ -144,7 +141,7 @@ stages:
           - task: EsrpCodeSigning@5
             displayName: 'ESRP CodeSigning MI RPM'
             inputs:
-              ConnectedServiceName: 'AzFilesAuthenticator'
+              ConnectedServiceName: 'AzFilesAuthenticator-wif'
               AppRegistrationClientId: $(AppRegistrationClientId)
               AppRegistrationTenantId: $(AppRegistrationTenantId)
 
@@ -188,38 +185,4 @@ stages:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
               artifactName: 'azfilesauth-signed'
 
-  - stage: ReleasePackages 
-    dependsOn: SignArtifacts
-    condition: succeeded('SignArtifacts')
-    displayName: 'Publish Packages to PMC'
-    jobs:
-    - job: ReleasePackages 
-      timeoutInMinutes: 120
-    
-      pool:
-        vmImage: 'ubuntu-22.04'
 
-      variables:
-          - name: root_dir
-            value: '$(System.DefaultWorkingDirectory)'
-
-      steps:
-        - checkout: none
-
-        - task: PipAuthenticate@1
-          inputs:
-            artifactFeeds: 'One/AzFilesAuthenticator'
-
-        - script: pip install pmc-cli
-          displayName: 'Install pmc-cli'
-
-        - task: DownloadBuildArtifacts@0
-          displayName: 'Download Signed Artifacts'
-          inputs:
-            artifactName: 'azfilesauth-signed'
-            downloadPath: $(Build.ArtifactStagingDirectory)
-          
-        - script: |
-            echo "Listing Signed Artifacts..."
-            ls -R $(Build.ArtifactStagingDirectory)/azfilesauth-signed/
-          displayName: 'List Signed Artifacts'
