@@ -87,11 +87,18 @@ def get_mount_options():
     result = subprocess.run(['mount', '-t', 'cifs'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     mount_output = result.stdout.decode('utf-8')
 
-    # Regex to find endpoint and username
-    pattern = re.compile(r'//([^/\s]+).*?username=([^,\s]+)')
     id_map = {}
-    for endpoint, client_id in pattern.findall(mount_output):
-        id_map[endpoint] = client_id
+    for line in mount_output.splitlines():
+        # Only consider CIFS mounts that explicitly use Kerberos auth
+        if 'sec=krb5' not in line:
+            continue
+        # Extract endpoint and username from this line
+        m_ep = re.search(r'//([^/\s]+)', line)
+        m_user = re.search(r'username=([^,\s]+)', line)
+        if m_ep and m_user:
+            endpoint = m_ep.group(1)
+            client_id = m_user.group(1)
+            id_map[endpoint] = client_id
 
     return id_map
 
