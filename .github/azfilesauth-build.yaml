@@ -114,20 +114,15 @@ stages:
             displayName: 'ESRP CodeSigning MI DEB'
             inputs:
               ConnectedServiceName: 'AzFilesAuthenticator-wif'
-              AppRegistrationClientId: $(AppRegistrationClientId)
-              AppRegistrationTenantId: $(AppRegistrationTenantId)
-
+              AppRegistrationClientId: '$(AppRegistrationClientId)'
+              AppRegistrationTenantId: '$(AppRegistrationTenantId)'
+              EsrpClientId: '$(AppRegistrationClientId)'
               UseMSIAuthentication: true
-              AuthAKVName: $(AuthAKVName)
-              AuthSignCertName: $(AuthSignCertName)
-
-              FolderPath: $(Build.ArtifactStagingDirectory)/azfilesauth-deb
+              AuthAKVName: '$(AuthAKVName)'
+              AuthSignCertName: '$(AuthSignCertName)'
+              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-deb'
               Pattern: '*.deb'
-              SessionTimeout: 90
-              ServiceEndpointUrl: 'https://api.esrp.microsoft.com/api/v2'
-              MaxConcurrency: 25
-              signConfigType: inlineSignParams
-              VerboseLogin: true
+              signConfigType: 'inlineSignParams'
               inlineOperation: |
                 [
                 {
@@ -138,6 +133,11 @@ stages:
                   "Parameters": {}
                 }
                 ]
+              SessionTimeout: '90'
+              MaxConcurrency: '25'
+              MaxRetryAttempts: '5'
+              PendingAnalysisWaitTimeoutMinutes: '5'
+              VerboseLogin: true
 
           # - task: EsrpCodeSigning@5
           #   displayName: 'ESRP CodeSigning MI RPM'
