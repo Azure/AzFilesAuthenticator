@@ -171,8 +171,9 @@ stages:
           - script: |
               chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
               # chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
-              cp azfilesauth-deb/*.deb $(Build.ArtifactStagingDirectory)/signed
-              # cp azfilesauth-rpm/*.rpm $(Build.ArtifactStagingDirectory)/signed
+              
+              cp $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb $(Build.ArtifactStagingDirectory)/signed
+              # cp $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm $(Build.ArtifactStagingDirectory)/signed
             displayName: 'Prepare Signed Artifacts'
           
           - script: |
