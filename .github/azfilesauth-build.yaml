@@ -169,9 +169,11 @@ stages:
           #       ]
 
           - script: |
+              echo "Listing unsigned artifacts in the staging directory..."
+              ls $(Build.ArtifactStagingDirectory)
               chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
               # chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
-              
+              mkdir -p $(Build.ArtifactStagingDirectory)/signed
               cp $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb $(Build.ArtifactStagingDirectory)/signed
               # cp $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm $(Build.ArtifactStagingDirectory)/signed
             displayName: 'Prepare Signed Artifacts'
