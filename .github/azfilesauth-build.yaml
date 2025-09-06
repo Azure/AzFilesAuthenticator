@@ -219,11 +219,26 @@ stages:
 
           - task: PipAuthenticate@1
             displayName: 'Pip Authenticate'
+            inputs:
+              artifactFeeds: 'One/AzFilesAuthenticator'
+          
+          - task: DownloadSecureFile@1
+            name: settings
+            inputs:
+              secureFile: 'AzFilesAuthenticator_settings.toml'
+            displayName: 'Download PMC Config File'
+          
+          - task: DownloadSecureFile@1
+            name: scopebindings
+            inputs:
+             secureFile: 'AzFilesAuthenticator_scopebindings.json'
+            displayName: 'Download EV2 Scope Bindings'
 
           - bash: |
               EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
               SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
-
+              cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
+              
               echo "1) Get pmc-cli"
               cd "$SHEXT_BUNDLE_DIR"
               mkdir python_dl
@@ -237,6 +252,7 @@ stages:
 
               echo "3) Archive for the ShellExt bundle"
               cd "$SHEXT_BUNDLE_DIR"
+              cp $(settings.secureFilePath) ./settings.toml
               tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
               ls -al
 
