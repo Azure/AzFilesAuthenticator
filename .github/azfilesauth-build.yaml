@@ -189,4 +189,78 @@ stages:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
               ArtifactName: 'azfilesauth-signed'
 
+  - stage: PublishPackages
+    displayName: 'Publish Artifacts'
+    dependsOn: SignArtifacts
+    condition: succeeded('SignArtifacts')
+    jobs:
+      - job: SignArtifacts
+        timeoutInMinutes: 120
 
+        pool:
+          vmImage: 'ubuntu-22.04'
+
+        steps:
+          - checkout: self
+            path: AzFilesAuthenticator
+            displayName: 'Checkout Repository'
+
+          # download artifacts that need to be published
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Signed Artifacts'
+            inputs:
+              ArtifactName: 'azfilesauth-signed'
+              downloadPath: $(Build.ArtifactStagingDirectory)
+
+          - task: UsePythonVersion@0
+            displayName: 'Use Python 3.9'
+            inputs:
+              versionSpec: 3.9
+
+          - task: PipAuthenticate@1
+            displayName: 'Pip Authenticate'
+
+          - bash: |
+              EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
+              SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
+
+              echo "1) Get pmc-cli"
+              cd "$SHEXT_BUNDLE_DIR"
+              mkdir python_dl
+              pip3 download -d python_dl pmc-cli
+
+              echo "2) Copy built DEB packages"
+              # assuming ESRP signed packages are here:
+              cd "$(Build.SourcesDirectory)/signed_packages"
+              mkdir "$SHEXT_BUNDLE_DIR/packages"
+              cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
+
+              echo "3) Archive for the ShellExt bundle"
+              cd "$SHEXT_BUNDLE_DIR"
+              tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
+              ls -al
+
+              echo "4) Copy EV2 files to artifacts staging"
+              cp -rv "$EV2_DIR" "$(Build.ArtifactStagingDirectory)/"
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish EV2_PMC Artifacts'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+              ArtifactName: 'ev2_pmc'
+          
+          # - task: Ev2RARollout@2
+          #   inputs:
+          #     EndpointProviderType: 'ApprovalService'
+          #     ApprovalServiceEnvironment: 'Production'
+          #     TaskAction: 'registerAndRollout'
+          #     ServiceRootLocation: 'LinkedArtifact'
+          #     ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+          #     RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
+          #     StageMapName: 'Microsoft.Azure.SDP.Standard'
+          #     UseServerMonitorTask: true
+          #     ValidateOnly: false
+              
+
+
+  
