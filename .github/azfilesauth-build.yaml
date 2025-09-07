@@ -246,7 +246,7 @@ stages:
 
               echo "2) Copy built DEB packages"
               # assuming ESRP signed packages are here:
-              cd "$(Build.SourcesDirectory)/signed_packages"
+              cd "$(Build.ArtifactStagingDirectory)/signed_packages"
               mkdir "$SHEXT_BUNDLE_DIR/packages"
               cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
 
