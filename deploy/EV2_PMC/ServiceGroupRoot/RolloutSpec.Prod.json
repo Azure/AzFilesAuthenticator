@@ -25,7 +25,7 @@
     {
       "name": "PMC.Publish",
       "targetType": "ServiceResourceDefinition",
-      "targetName": "PMC.Shell.Resource",
+      "targetName": "PMC.Shell",
       "actions": ["shell/PMCPublish"]
     }
   ]

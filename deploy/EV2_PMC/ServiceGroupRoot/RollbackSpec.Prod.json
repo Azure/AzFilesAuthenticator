@@ -4,7 +4,7 @@
   "rolloutMetadata": {
     "serviceModelPath": "ServiceModel.Prod.json",
     "scopeBindingsPath": "ScopeBindings.Prod.json",
-  "name": "Microsoft.Azure.XStore.XSMB.PMC.Rollback",
+  "name": "Microsoft.Azure.XStore.XSMB.AzFilesAuthenticator.Rollback",
     "rolloutType": "Hotfix",
     "buildSource": {
       "parameters": {
@@ -25,7 +25,7 @@
     {
       "name": "PMC.Rollback",
       "targetType": "ServiceResourceDefinition",
-      "targetName": "PMC.Shell.Resource",
+      "targetName": "PMC.Shell",
       "actions": ["shell/PMCRollback"]
     }
   ]
