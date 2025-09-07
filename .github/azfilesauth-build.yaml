@@ -271,7 +271,7 @@ stages:
           #     ApprovalServiceEnvironment: 'Production'
           #     TaskAction: 'registerAndRollout'
           #     ServiceRootLocation: 'LinkedArtifact'
-          #     ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+          #     ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
           #     RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
           #     StageMapName: 'Microsoft.Azure.SDP.Standard'
           #     UseServerMonitorTask: true
