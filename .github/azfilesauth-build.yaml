@@ -227,7 +227,13 @@ stages:
             inputs:
               secureFile: 'AzFilesAuthenticator_settings.toml'
             displayName: 'Download PMC Config File'
-          
+
+          - task: DownloadSecureFile@1
+            name: serviceModel
+            inputs:
+             secureFile: 'AzFilesAuthenticator_ServiceModel.Prod.json'
+            displayName: 'Download EV2 Scope Bindings'
+
           - task: DownloadSecureFile@1
             name: scopebindings
             inputs:
@@ -238,6 +244,7 @@ stages:
               EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
               SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
               cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
+              cp $(serviceModel.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ServiceModel.Prod.json"
               
               echo "1) Get pmc-cli"
               cd "$SHEXT_BUNDLE_DIR"
@@ -265,17 +272,17 @@ stages:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
               ArtifactName: 'ev2_pmc'
           
-          # - task: Ev2RARollout@2
-          #   inputs:
-          #     EndpointProviderType: 'ApprovalService'
-          #     ApprovalServiceEnvironment: 'Production'
-          #     TaskAction: 'registerAndRollout'
-          #     ServiceRootLocation: 'LinkedArtifact'
-          #     ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
-          #     RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
-          #     StageMapName: 'Microsoft.Azure.SDP.Standard'
-          #     UseServerMonitorTask: true
-          #     ValidateOnly: false
+          - task: Ev2RARollout@2
+            inputs:
+              EndpointProviderType: 'ApprovalService'
+              ApprovalServiceEnvironment: 'Production'
+              TaskAction: 'registerAndRollout'
+              ServiceRootLocation: 'LinkedArtifact'
+              ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
+              RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
+              StageMapName: 'Microsoft.Azure.SDP.Standard'
+              UseServerMonitorTask: true
+              ValidateOnly: false
               
 
 
