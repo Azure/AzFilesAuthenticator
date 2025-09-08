@@ -198,7 +198,7 @@ stages:
         timeoutInMinutes: 120
 
         pool:
-          vmImage: 'ubuntu-22.04'
+          vmImage: 'ubuntu-20.04'
 
         steps:
           - checkout: self
@@ -215,7 +215,7 @@ stages:
           - task: UsePythonVersion@0
             displayName: 'Use Python 3.8'
             inputs:
-              versionSpec: 3.8
+              versionSpec: 3.8.10
 
           - task: PipAuthenticate@1
             displayName: 'Pip Authenticate'
