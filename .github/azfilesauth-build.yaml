@@ -198,7 +198,8 @@ stages:
         timeoutInMinutes: 120
 
         pool:
-          vmImage: 'ubuntu-20.04'
+          vmImage: 'ubuntu-22.04'
+          container: ubuntu:20.04
 
         steps:
           - checkout: self
