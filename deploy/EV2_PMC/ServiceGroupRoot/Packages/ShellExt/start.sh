@@ -7,6 +7,7 @@ set -e
 echo "1) Install PMC CLI"
 python3 -V
 pip3 install python_dl/*.whl
+python3 -m pip debug --verbose
 
 echo "2) Test pmc-cli"
 which pmc
