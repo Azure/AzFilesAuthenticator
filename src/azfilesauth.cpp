@@ -180,6 +180,8 @@ static void az_syslog(int priority, const char* format, ...) {
     char ts[64] = {0};
     if (localtime_r(&now, &tm_local)) {
         std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S %Z", &tm_local);
+    } else {
+        std::snprintf(ts, sizeof(ts), "UNKNOWN_TIME");
     }
 
     FILE* out = g_log_fp; // no stderr fallback
