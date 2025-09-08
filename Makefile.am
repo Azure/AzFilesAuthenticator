@@ -40,3 +40,6 @@ EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefre
 CLEANFILES = azfilesauthmanager azfilesrefresh
 
 # ensure only one instance of service is running
+
+# Install public headers
+include_HEADERS = include/azfilesauth.h include/azfilesauthversion.h

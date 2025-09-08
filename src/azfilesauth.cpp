@@ -894,7 +894,7 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
     return rc;
 }
 
-void extern_smb_list_credential(bool is_json) {
+int extern_smb_list_credential(bool is_json) {
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
@@ -902,7 +902,7 @@ void extern_smb_list_credential(bool is_json) {
     if (user_uid_str.empty()) {
         syslog(LOG_ERR, "Failed to read USER_UID from config file at %s", CONFIG_FILE_PATH);
         printf("Failed to read USER_UID from config file at %s\n", CONFIG_FILE_PATH);
-        return;
+        return -1;
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
@@ -910,9 +910,15 @@ void extern_smb_list_credential(bool is_json) {
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         printf("Failed to switch to user UID %d: %s\n", user_uid, strerror(errno));
-        return;
+        return -1;
     }
 
     smb_list_credential(is_json, user_uid);
     seteuid(prev_uid);
+    return 0;
 }
+
+const char* extern_smb_version() {
+    return AZFILESAUTH_VERSION;
+}
+
