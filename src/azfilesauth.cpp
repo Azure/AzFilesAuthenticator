@@ -120,10 +120,16 @@ static void az_logger_init() {
             int fd = ::open(g_log_file_path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0644);
             if (fd >= 0) {
                 // Ensure close-on-exec
-                fcntl(fd, F_SETFD, FD_CLOEXEC);
-                g_log_fp = fdopen(fd, "a");
-                if (!g_log_fp) {
+                if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
+                    std::fprintf(stderr,
+                                 "azfilesauth: failed to set FD_CLOEXEC on log file '%s': %s; falling back to syslog.\n",
+                                 g_log_file_path.c_str(), std::strerror(errno));
                     ::close(fd);
+                } else {
+                    g_log_fp = fdopen(fd, "a");
+                    if (!g_log_fp) {
+                        ::close(fd);
+                    }
                 }
             }
             // If file cannot be opened, disable file logging to use syslog backend
