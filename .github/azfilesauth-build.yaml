@@ -194,7 +194,7 @@ stages:
     dependsOn: SignArtifacts
     condition: succeeded('SignArtifacts')
     jobs:
-      - job: SignArtifacts
+      - job: BuildEV2Artifacts
         timeoutInMinutes: 120
 
         pool:
@@ -253,7 +253,7 @@ stages:
 
               echo "2) Copy built DEB packages"
               # assuming ESRP signed packages are here:
-              cd "$(Build.ArtifactStagingDirectory)/signed_packages"
+              cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
               mkdir "$SHEXT_BUNDLE_DIR/packages"
               cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
 
@@ -270,8 +270,19 @@ stages:
             displayName: 'Publish EV2_PMC Artifacts'
             inputs:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+              ArtifactName: 'EV2_PMC'
+
+      - job: Ev2Rollout
+        displayName: 'EV2 Rollout'
+        pool: 
+          type: release
+        dependsOn: BuildEV2Artifacts
+        steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download PMC Artifacts'
+            inputs:
               ArtifactName: 'ev2_pmc'
-          
+              downloadPath: $(Build.ArtifactStagingDirectory)
           - task: Ev2RARollout@2
             inputs:
               EndpointProviderType: 'ApprovalService'
@@ -281,6 +292,7 @@ stages:
               ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
               RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
               StageMapName: 'Microsoft.Azure.SDP.Standard'
+              Select: regions('northeurope')
               UseServerMonitorTask: true
               ValidateOnly: false
               
