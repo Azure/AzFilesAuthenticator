@@ -11,12 +11,12 @@ import pwd
 
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 
-USAGE_MESSAGE = """
-Usage: 
-        azfilesauthmanager list
-        azfilesauthmanager set <file_endpoint_uri> <oauth_token>
-        azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
-        azfilesauthmanager clear <file_endpoint_uri>
+USAGE_MESSAGE = """Usage:
+    azfilesauthmanager list [--json]
+    azfilesauthmanager set <file_endpoint_uri> <oauth_token>
+    azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
+    azfilesauthmanager clear <file_endpoint_uri>
+    azfilesauthmanager --version
 """
 
 library_paths = [
@@ -41,14 +41,17 @@ lib.extern_smb_set_credential_oauth_token.argtypes = [ctypes.c_char_p, ctypes.c_
 lib.extern_smb_set_credential_oauth_token.restype = ctypes.c_int
 
 lib.extern_smb_clear_credential.argtypes = [ctypes.c_char_p]
-lib.extern_smb_clear_credential.restype = ctypes.c_int 
+lib.extern_smb_clear_credential.restype = ctypes.c_int
+lib.extern_smb_list_credential.argtypes = [ctypes.c_bool]
+lib.extern_smb_list_credential.restype = ctypes.c_int
+lib.extern_smb_version.restype = ctypes.c_char_p
 
 
 def init_new_user():
     # Create a new linux user, and get its UID from the syscall's return
     new_user = "azfilesuser"
 
-    # check if USR_UID is already populated in config file
+    # check if USER_UID is already populated in config file
     try:
         with open(CONFIG_FILE_PATH, "r") as config_file:
             for line in config_file:
@@ -147,8 +150,9 @@ def azfiles_clear(file_endpoint_uri):
 
 def azfiles_list(is_json):
     try:
-        result = lib.extern_smb_list_credential(is_json)
-
+        rc = lib.extern_smb_list_credential(is_json)
+        if rc != 0:
+            sys.exit(rc)
     except subprocess.CalledProcessError as e:
         print(f"Error calling AzAuthenticatorLib: {e.stderr}")
         sys.exit(1)
@@ -222,6 +226,9 @@ def run_azfilesauthmanager():
 
         azfiles_clear(file_endpoint_uri)
 
+    elif command == "--version":
+        v = lib.extern_smb_version()
+        print(v.decode() if isinstance(v, (bytes, bytearray)) else v)
     else:
         print(USAGE_MESSAGE)
         sys.exit(1)
