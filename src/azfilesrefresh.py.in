@@ -65,9 +65,29 @@ def get_tickets():
         log_error(f"Error getting tickets: {e}")
         return []
 
+EPOCH_RE = re.compile(r"\(epoch:\s*(\d+)\)")
+
+def _parse_epoch(field_value: str) -> int:
+    """Extract epoch from a string of the form '... (epoch: NNN)'.
+    Returns 0 if pattern not found."""
+    if not field_value:
+        return 0
+    m = EPOCH_RE.search(field_value)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except Exception:
+        return 0
+
 def is_expiring(ticket):
     try:
-        valid_till = int(ticket['ticket_renew_till'])
+        end_raw = ticket.get('ticket_end_time', '')
+        valid_till = _parse_epoch(end_raw)
+        if valid_till == 0:
+            # Log as error and force refresh (treat as expired) to avoid stale credentials
+            log_error(f"Unparsable or missing ticket_end_time '{end_raw}'; forcing refresh.")
+            return True
         current_time = int(time.time())
         return (current_time + REFRESH_BEFORE_EXPIRY + SLEEP_TIME) >= valid_till
     except Exception as e:
