@@ -708,6 +708,13 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     const char* KRB5_CC_NAME;
     char *server_name = NULL;
     krb5_error_code ret;
+    time_t start_epoch = 0;
+    char start_local[64] = "N/A";
+    time_t renew_epoch = 0;
+    char renew_local[64] = "N/A";
+    time_t end_epoch = 0;
+    char end_local[64] = "N/A";
+    struct tm tm_local;
 
     // Use read_config_value to get the value of KRB5_CC_NAME
     krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
@@ -761,6 +768,35 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
                 goto out;
             }
             
+            // Prepare local (system) formatted time for start, end (expiry) and renew_till
+            start_epoch = static_cast<time_t>(creds.times.starttime ? creds.times.starttime : creds.times.authtime);
+            std::strncpy(start_local, "N/A", sizeof(start_local));
+            start_local[sizeof(start_local)-1] = '\0';
+            if (start_epoch > 0) {
+                if (localtime_r(&start_epoch, &tm_local) != nullptr) {
+                    // Example (klist style): 01/15/25 04:28:48
+                    std::strftime(start_local, sizeof(start_local), "%m/%d/%y %H:%M:%S %Z", &tm_local);
+                }
+            }
+            end_epoch = static_cast<time_t>(creds.times.endtime);
+            std::strncpy(end_local, "N/A", sizeof(end_local));
+            end_local[sizeof(end_local)-1] = '\0';
+            if (end_epoch > 0) {
+                if (localtime_r(&end_epoch, &tm_local) != nullptr) {
+                    // Example (klist style): 01/15/25 05:12:58
+                    std::strftime(end_local, sizeof(end_local), "%m/%d/%y %H:%M:%S %Z", &tm_local);
+                }
+            }
+            renew_epoch = static_cast<time_t>(creds.times.renew_till);
+            std::strncpy(renew_local, "N/A", sizeof(renew_local));
+            renew_local[sizeof(renew_local)-1] = '\0';
+            if (renew_epoch > 0) {
+                if (localtime_r(&renew_epoch, &tm_local) != nullptr) {
+                    // Example (klist style): 01/15/25 05:12:58
+                    std::strftime(renew_local, sizeof(renew_local), "%m/%d/%y %H:%M:%S %Z", &tm_local);
+                }
+            }
+
             if (is_json) {
                 if (!first) {
                     json_output << ",\n"; // Add a comma between JSON objects
@@ -771,7 +807,9 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
                 << "    \"client\": \"" << std::string(creds.client->data->data, creds.client->data->length) << "\",\n"
                 << "    \"realm\": \"" << std::string(creds.server->realm.data, creds.server->realm.length) << "\",\n"
                 << "    \"ticket_flags\": " << creds.ticket_flags << ",\n"
-                << "    \"ticket_renew_till\": " << creds.times.renew_till << "\n"
+                << "    \"ticket_start_time\": \"" << start_local << " (epoch: " << (creds.times.starttime ? creds.times.starttime : creds.times.authtime) << ")\",\n"
+                << "    \"ticket_end_time\": \"" << end_local << " (epoch: " << creds.times.endtime << ")\",\n"
+                << "    \"ticket_renew_till\": \"" << renew_local << " (epoch: " << creds.times.renew_till << ")\"\n"
                 << "  }";
             } else {
                 std::cout << "Credential " << count << ":" << std::endl;
@@ -779,7 +817,9 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
                 std::cout << "  Client: " << std::string(creds.client->data->data, creds.client->data->length) << std::endl;
                 std::cout << "  Realm: " << std::string(creds.server->realm.data, creds.server->realm.length) << std::endl;
                 std::cout << "  Ticket flags: " << creds.ticket_flags << std::endl;
-                std::cout << "  Ticket renew till: " << creds.times.renew_till << std::endl;
+                std::cout << "  Ticket start time: " << start_local << " (epoch: " << (creds.times.starttime ? creds.times.starttime : creds.times.authtime) << ")" << std::endl;
+                std::cout << "  Ticket end time:   " << end_local << " (epoch: " << creds.times.endtime << ")" << std::endl;
+                std::cout << "  Ticket renew till: " << renew_local << " (epoch: " << creds.times.renew_till << ")" << std::endl;
             }
             krb5_free_unparsed_name(context, server_name);
         }
