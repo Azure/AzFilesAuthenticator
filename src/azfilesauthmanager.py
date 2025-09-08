@@ -234,7 +234,8 @@ def run_azfilesauthmanager():
         sys.exit(1)
 
 if __name__ == "__main__":
-    if os.geteuid() != 0:
+    if os.geteuid() == 0:
+        run_azfilesauthmanager()
+    else:
         print("Script is not running as root. Please run as root.")
         sys.exit(1)
-    run_azfilesauthmanager()
