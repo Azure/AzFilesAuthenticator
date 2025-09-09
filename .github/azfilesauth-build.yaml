@@ -215,13 +215,16 @@ stages:
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
                 pmc --version
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list
+                alias pmc='pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4"'
+                pmc repo list --path-contains "ubuntu/22.04/prod"
+
                 if [ $? -ne 0 ]; then
                   exit 1
                 fi
                 pwd
                 ls
                 find . -type f
+
 
       # - job: BuildEV2Artifacts
       #   timeoutInMinutes: 120
