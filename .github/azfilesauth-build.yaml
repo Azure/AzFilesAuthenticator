@@ -191,33 +191,13 @@ stages:
 
   - stage: PublishPackages
     displayName: 'Publish Artifacts'
-    dependsOn: SignArtifacts
-    condition: succeeded('SignArtifacts')
+    # dependsOn: SignArtifacts
+    # condition: succeeded('SignArtifacts')
     jobs:
-      - job: BuildEV2Artifacts
-        timeoutInMinutes: 120
-
+      - job: PublishUsingPMC_MI
         pool:
           vmImage: 'ubuntu-22.04'
-          container: ubuntu:20.04
-
         steps:
-          - checkout: self
-            path: AzFilesAuthenticator
-            displayName: 'Checkout Repository'
-
-          # download artifacts that need to be published
-          - task: DownloadBuildArtifacts@1
-            displayName: 'Download Signed Artifacts'
-            inputs:
-              ArtifactName: 'azfilesauth-signed'
-              downloadPath: $(Build.ArtifactStagingDirectory)
-
-          - task: UsePythonVersion@0
-            displayName: 'Use Python 3.8'
-            inputs:
-              versionSpec: 3.8
-
           - task: PipAuthenticate@1
             displayName: 'Pip Authenticate'
             inputs:
@@ -232,6 +212,8 @@ stages:
               scriptLocation: inlineScript
               workingDirectory: $(Build.ArtifactStagingDirectory)/
               inlineScript: |
+                echo "1) Installing pmc-cli"
+                pip install pmc-cli
                 pmc --version
                 pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list
                 if [ $? -ne 0 ]; then
@@ -241,6 +223,35 @@ stages:
                 ls
                 find . -type f
 
+      # - job: BuildEV2Artifacts
+      #   timeoutInMinutes: 120
+
+      #   pool:
+      #     vmImage: 'ubuntu-22.04'
+      #     # container: ubuntu:20.04
+
+      #   steps:
+      #     - checkout: self
+      #       path: AzFilesAuthenticator
+      #       displayName: 'Checkout Repository'
+
+      #     # download artifacts that need to be published
+      #     - task: DownloadBuildArtifacts@1
+      #       displayName: 'Download Signed Artifacts'
+      #       inputs:
+      #         ArtifactName: 'azfilesauth-signed'
+      #         downloadPath: $(Build.ArtifactStagingDirectory)
+
+      #     - task: UsePythonVersion@0
+      #       displayName: 'Use Python 3.8'
+      #       inputs:
+      #         versionSpec: 3.8
+
+      #     - task: PipAuthenticate@1
+      #       displayName: 'Pip Authenticate'
+      #       inputs:
+      #         artifactFeeds: 'One/AzFilesAuthenticator'
+          
           
       #     - task: DownloadSecureFile@1
       #       name: settings
