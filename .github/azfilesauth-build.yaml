@@ -250,7 +250,8 @@ stages:
               echo "1) Get pmc-cli"
               cd "$SHEXT_BUNDLE_DIR"
               mkdir python_dl
-              pip3 download -d python_dl pmc-cli --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
+              pip3 download -d python_dl pmc-cli 
+              # --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
 
               echo "2) Copy built DEB packages"
               # assuming ESRP signed packages are here:
