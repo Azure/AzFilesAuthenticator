@@ -191,8 +191,8 @@ stages:
 
   - stage: PublishPackages
     displayName: 'Publish Artifacts'
-    # dependsOn: SignArtifacts
-    # condition: succeeded('SignArtifacts')
+    dependsOn: SignArtifacts
+    condition: succeeded('SignArtifacts')
     jobs:
       - job: PublishUsingPMC_MI
         pool:
@@ -203,6 +203,13 @@ stages:
             inputs:
               artifactFeeds: 'One/AzFilesAuthenticator'
           
+          # download artifacts that need to be published
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Signed Artifacts'
+            inputs:
+              ArtifactName: 'azfilesauth-signed'
+              downloadPath: $(Build.ArtifactStagingDirectory)
+
           - task: AzureCLI@2
             displayName: 'Test PMC installation'
             inputs:
@@ -210,7 +217,7 @@ stages:
               azureSubscription: 'AzFilesAuthenticator-wif'
               scriptType: bash
               scriptLocation: inlineScript
-              workingDirectory: $(Build.ArtifactStagingDirectory)/
+              workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
               inlineScript: |
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
@@ -222,6 +229,19 @@ stages:
                 pwd
                 ls
                 find . -type f
+
+                $PKG_FILE="azfilesauth_1.0-1_amd64.deb"
+                $PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
+
+                echo uploading "$PKG_FILE" to pmc...
+                PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
+                $ID_LIST=$PKG_ID
+
+                echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
+                echo "done publishing to $PMC_REPO_NAME"
+
 
 
       # - job: BuildEV2Artifacts
