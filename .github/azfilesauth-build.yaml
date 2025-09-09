@@ -194,18 +194,15 @@ stages:
     dependsOn: SignArtifacts
     condition: succeeded('SignArtifacts')
     jobs:
-      - job: BuildEV2Artifacts
-        timeoutInMinutes: 120
-
+      - job: PublishUsingPMC_MI
         pool:
           vmImage: 'ubuntu-22.04'
-          container: ubuntu:20.04
-
         steps:
-          - checkout: self
-            path: AzFilesAuthenticator
-            displayName: 'Checkout Repository'
-
+          - task: PipAuthenticate@1
+            displayName: 'Pip Authenticate'
+            inputs:
+              artifactFeeds: 'One/AzFilesAuthenticator'
+          
           # download artifacts that need to be published
           - task: DownloadBuildArtifacts@1
             displayName: 'Download Signed Artifacts'
@@ -213,90 +210,145 @@ stages:
               ArtifactName: 'azfilesauth-signed'
               downloadPath: $(Build.ArtifactStagingDirectory)
 
-          - task: UsePythonVersion@0
-            displayName: 'Use Python 3.8'
+          - task: AzureCLI@2
+            displayName: 'Test PMC installation'
             inputs:
-              versionSpec: 3.8
+              addSpnToEnvironment: true
+              azureSubscription: 'AzFilesAuthenticator-wif'
+              scriptType: bash
+              scriptLocation: inlineScript
+              workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
+              inlineScript: |
+                echo "1) Installing pmc-cli"
+                pip install pmc-cli
+                pmc --version
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "ubuntu/22.04/prod"
+                if [ $? -ne 0 ]; then
+                  exit 1
+                fi
+                pwd
+                ls
+                find . -type f
 
-          - task: PipAuthenticate@1
-            displayName: 'Pip Authenticate'
-            inputs:
-              artifactFeeds: 'One/AzFilesAuthenticator'
+                PKG_FILE="azfilesauth_1.0-1_amd64.deb"
+                PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
+                PMC_RELEASE_NAME="jammy"
+
+                echo uploading "$PKG_FILE" to pmc...
+                PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
+                ID_LIST=$PKG_ID
+
+                echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_RELEASE_NAME"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
+                echo "done publishing to $PMC_REPO_NAME"
+
+
+
+      # - job: BuildEV2Artifacts
+      #   timeoutInMinutes: 120
+
+      #   pool:
+      #     vmImage: 'ubuntu-22.04'
+      #     # container: ubuntu:20.04
+
+      #   steps:
+      #     - checkout: self
+      #       path: AzFilesAuthenticator
+      #       displayName: 'Checkout Repository'
+
+      #     # download artifacts that need to be published
+      #     - task: DownloadBuildArtifacts@1
+      #       displayName: 'Download Signed Artifacts'
+      #       inputs:
+      #         ArtifactName: 'azfilesauth-signed'
+      #         downloadPath: $(Build.ArtifactStagingDirectory)
+
+      #     - task: UsePythonVersion@0
+      #       displayName: 'Use Python 3.8'
+      #       inputs:
+      #         versionSpec: 3.8
+
+      #     - task: PipAuthenticate@1
+      #       displayName: 'Pip Authenticate'
+      #       inputs:
+      #         artifactFeeds: 'One/AzFilesAuthenticator'
           
-          - task: DownloadSecureFile@1
-            name: settings
-            inputs:
-              secureFile: 'AzFilesAuthenticator_settings.toml'
-            displayName: 'Download PMC Config File'
+          
+      #     - task: DownloadSecureFile@1
+      #       name: settings
+      #       inputs:
+      #         secureFile: 'AzFilesAuthenticator_settings.toml'
+      #       displayName: 'Download PMC Config File'
 
-          - task: DownloadSecureFile@1
-            name: serviceModel
-            inputs:
-             secureFile: 'AzFilesAuthenticator_ServiceModel.Prod.json'
-            displayName: 'Download EV2 Scope Bindings'
+      #     - task: DownloadSecureFile@1
+      #       name: serviceModel
+      #       inputs:
+      #        secureFile: 'AzFilesAuthenticator_ServiceModel.Prod.json'
+      #       displayName: 'Download EV2 Scope Bindings'
 
-          - task: DownloadSecureFile@1
-            name: scopebindings
-            inputs:
-             secureFile: 'AzFilesAuthenticator_scopebindings.json'
-            displayName: 'Download EV2 Scope Bindings'
+      #     - task: DownloadSecureFile@1
+      #       name: scopebindings
+      #       inputs:
+      #        secureFile: 'AzFilesAuthenticator_scopebindings.json'
+      #       displayName: 'Download EV2 Scope Bindings'
 
-          - bash: |
-              EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
-              SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
-              cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
-              cp $(serviceModel.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ServiceModel.Prod.json"
+      #     - bash: |
+      #         EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
+      #         SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
+      #         cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
+      #         cp $(serviceModel.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ServiceModel.Prod.json"
               
-              echo "1) Get pmc-cli"
-              cd "$SHEXT_BUNDLE_DIR"
-              mkdir python_dl
-              pip3 download -d python_dl pmc-cli 
-              # --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
+      #         echo "1) Get pmc-cli"
+      #         cd "$SHEXT_BUNDLE_DIR"
+      #         mkdir python_dl
+      #         pip3 download -d python_dl pmc-cli 
+      #         # --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
 
-              echo "2) Copy built DEB packages"
-              # assuming ESRP signed packages are here:
-              cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
-              mkdir "$SHEXT_BUNDLE_DIR/packages"
-              cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
+      #         echo "2) Copy built DEB packages"
+      #         # assuming ESRP signed packages are here:
+      #         cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
+      #         mkdir "$SHEXT_BUNDLE_DIR/packages"
+      #         cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
 
-              echo "3) Archive for the ShellExt bundle"
-              cd "$SHEXT_BUNDLE_DIR"
-              cp $(settings.secureFilePath) ./settings.toml
-              tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
-              ls -al
+      #         echo "3) Archive for the ShellExt bundle"
+      #         cd "$SHEXT_BUNDLE_DIR"
+      #         cp $(settings.secureFilePath) ./settings.toml
+      #         tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
+      #         ls -al
 
-              echo "4) Copy EV2 files to artifacts staging"
-              cp -rv "$EV2_DIR" "$(Build.ArtifactStagingDirectory)/"
+      #         echo "4) Copy EV2 files to artifacts staging"
+      #         cp -rv "$EV2_DIR" "$(Build.ArtifactStagingDirectory)/"
 
-          - task: PublishBuildArtifacts@1
-            displayName: 'Publish EV2_PMC Artifacts'
-            inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
-              ArtifactName: 'EV2_PMC'
+      #     - task: PublishBuildArtifacts@1
+      #       displayName: 'Publish EV2_PMC Artifacts'
+      #       inputs:
+      #         PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+      #         ArtifactName: 'EV2_PMC'
 
-      - job: Ev2Rollout
-        displayName: 'EV2 Rollout'
-        pool: 
-          type: release
-        dependsOn: BuildEV2Artifacts
-        steps:
-          - task: DownloadBuildArtifacts@1
-            displayName: 'Download PMC Artifacts'
-            inputs:
-              ArtifactName: 'ev2_pmc'
-              downloadPath: $(Build.ArtifactStagingDirectory)
-          - task: Ev2RARollout@2
-            inputs:
-              EndpointProviderType: 'ApprovalService'
-              ApprovalServiceEnvironment: 'Production'
-              TaskAction: 'registerAndRollout'
-              ServiceRootLocation: 'LinkedArtifact'
-              ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
-              RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
-              StageMapName: 'Microsoft.Azure.SDP.Standard'
-              Select: regions('northeurope')
-              UseServerMonitorTask: true
-              ValidateOnly: false
+      # - job: Ev2Rollout
+      #   displayName: 'EV2 Rollout'
+      #   pool: 
+      #     type: release
+      #   dependsOn: BuildEV2Artifacts
+      #   steps:
+      #     - task: DownloadBuildArtifacts@1
+      #       displayName: 'Download PMC Artifacts'
+      #       inputs:
+      #         ArtifactName: 'ev2_pmc'
+      #         downloadPath: $(Build.ArtifactStagingDirectory)
+      #     - task: Ev2RARollout@2
+      #       inputs:
+      #         EndpointProviderType: 'ApprovalService'
+      #         ApprovalServiceEnvironment: 'Production'
+      #         TaskAction: 'registerAndRollout'
+      #         ServiceRootLocation: 'LinkedArtifact'
+      #         ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
+      #         RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
+      #         StageMapName: 'Microsoft.Azure.SDP.Standard'
+      #         Select: regions('northeurope')
+      #         UseServerMonitorTask: true
+      #         ValidateOnly: false
               
 
 
