@@ -20,6 +20,10 @@ stages:
           displayName: 'Checkout Repository'
 
         - script: |
+            git status
+            git branch
+            git checkout main
+            git status
             echo "Building DEB package..."
             chmod +x package-deb.sh
             ./package-deb.sh
