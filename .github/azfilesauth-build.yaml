@@ -215,9 +215,7 @@ stages:
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
                 pmc --version
-                alias pmc='pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4"'
-                pmc repo list --path-contains "ubuntu/22.04/prod"
-
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "ubuntu/22.04/prod"
                 if [ $? -ne 0 ]; then
                   exit 1
                 fi
