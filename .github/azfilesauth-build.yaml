@@ -232,13 +232,14 @@ stages:
 
                 PKG_FILE="azfilesauth_1.0-1_amd64.deb"
                 PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
+                PMC_RELEASE_NAME="jammy"
 
                 echo uploading "$PKG_FILE" to pmc...
                 PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
                 ID_LIST=$PKG_ID
 
                 echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_RELEASE_NAME"
                 pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
                 echo "done publishing to $PMC_REPO_NAME"
 
