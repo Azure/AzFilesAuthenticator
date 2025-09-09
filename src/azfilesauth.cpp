@@ -11,6 +11,190 @@
 #include "azfilesauth.h"
 #include <unistd.h>
 #include <syslog.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cctype>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
+
+
+// ---- Lightweight logging wrapper ----
+// Some systems may not have a running syslog daemon. In that case, allow
+// logging to a file (default: /var/log/azfilesauth.log), configurable via
+// config.yaml using keys:
+// LOG_DESTINATION: "syslog" | "file"   (optional)
+// LOG_FILE_PATH: "/var/log/azfilesauth.log" (optional)
+// Parse logging settings from config.yaml to control file vs syslog logging.
+
+static bool g_logger_initialized = false;
+static bool g_use_file_log = false;
+static FILE* g_log_fp = nullptr;
+static const char* g_default_log_path = "/var/log/azfilesauth.log";
+static std::string g_log_file_path;
+// No auto-creation; we assume parent directory exists. If not, we fall back to syslog.
+
+static std::string get_parent_dir(const std::string& path) {
+    if (path.empty()) return std::string();
+    size_t pos = path.rfind('/');
+    if (pos == std::string::npos) return std::string();
+    if (pos == 0) return std::string("/");
+    return path.substr(0, pos);
+}
+
+static bool dir_exists(const std::string& path) {
+    if (path.empty()) return false;
+    struct stat st;
+    return (::stat(path.c_str(), &st) == 0) && S_ISDIR(st.st_mode);
+}
+
+// Minimal, logging-free config reader to avoid recursion during logger init.
+static std::string read_config_value_raw(const std::string& key) {
+    std::ifstream file(CONFIG_FILE_PATH);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        size_t colon_pos = line.find(":");
+        if (colon_pos != std::string::npos) {
+            std::string found_key = line.substr(0, colon_pos);
+            std::string value = line.substr(colon_pos + 1);
+
+            // Trim whitespace and quotes
+            found_key.erase(0, found_key.find_first_not_of(" \t"));
+            if (!found_key.empty())
+                found_key.erase(found_key.find_last_not_of(" \t") + 1);
+            value.erase(0, value.find_first_not_of(" \t\""));
+            if (!value.empty())
+                value.erase(value.find_last_not_of(" \t\"") + 1);
+
+            if (found_key == key) {
+                return value;
+            }
+        }
+    }
+    return "";
+}
+
+static const char* prio_to_str(int p) {
+    switch (p) {
+        case LOG_EMERG:   return "EMERG";
+        case LOG_ALERT:   return "ALERT";
+        case LOG_CRIT:    return "CRIT";
+        case LOG_ERR:     return "ERROR";
+        case LOG_WARNING: return "WARN";
+        case LOG_NOTICE:  return "NOTICE";
+        case LOG_INFO:    return "INFO";
+        case LOG_DEBUG:   return "DEBUG";
+        default:          return "LOG";
+    }
+}
+
+static void az_logger_init() {
+    if (g_logger_initialized) return;
+
+    // Read from config file.
+    std::string dest = read_config_value_raw("LOG_DESTINATION");
+    for (char& c : dest) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (dest == "file") {
+        g_use_file_log = true;
+    } else if (dest == "syslog") {
+        g_use_file_log = false;
+    } // else: default is syslog
+
+    std::string path = read_config_value_raw("LOG_FILE_PATH");
+    g_log_file_path = !path.empty() ? path : std::string(g_default_log_path);
+
+    if (g_use_file_log) {
+        // If parent directory doesn't exist, print error to stderr and fall back to syslog
+        std::string parent = get_parent_dir(g_log_file_path);
+        if (!dir_exists(parent)) {
+            std::fprintf(stderr,
+                         "azfilesauth: log directory '%s' does not exist (LOG_FILE_PATH=%s); falling back to syslog.\n",
+                         parent.c_str(), g_log_file_path.c_str());
+            g_use_file_log = false;
+        } else {
+            // Attempt to create or open the file with default permissions (0644)
+            int fd = ::open(g_log_file_path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0644);
+            if (fd >= 0) {
+                // Ensure close-on-exec
+                if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
+                    std::fprintf(stderr,
+                                 "azfilesauth: failed to set FD_CLOEXEC on log file '%s': %s; falling back to syslog.\n",
+                                 g_log_file_path.c_str(), std::strerror(errno));
+                    ::close(fd);
+                } else {
+                    g_log_fp = fdopen(fd, "a");
+                    if (!g_log_fp) {
+                        ::close(fd);
+                    }
+                }
+            }
+            // If file cannot be opened, disable file logging to use syslog backend
+            if (!g_log_fp) {
+                g_use_file_log = false;
+            }
+        }
+    }
+
+    g_logger_initialized = true;
+}
+
+// Initialize logger once when the shared library is loaded
+extern "C" __attribute__((constructor)) void az_logger_ctor(void) {
+    az_logger_init();
+}
+
+// Cleanup on unload: close the log file if open
+extern "C" __attribute__((destructor)) void az_logger_dtor(void) {
+    if (g_log_fp) {
+        std::fflush(g_log_fp);
+        std::fclose(g_log_fp);
+        g_log_fp = nullptr;
+    }
+}
+
+// Replacement for syslog() that can write to a file.
+static void az_syslog(int priority, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    // If using syslog backend, delegate and return
+    if (!g_use_file_log) {
+        vsyslog(priority, format, args);
+        va_end(args);
+        return;
+    }
+
+    // If file logging was requested but file could not be opened, suppress output.
+    if (!g_log_fp) {
+        va_end(args);
+        return;
+    }
+
+    // Write to file with timestamp and level
+    time_t now = std::time(nullptr);
+    struct tm tm_local;
+    char ts[64] = {0};
+    if (localtime_r(&now, &tm_local)) {
+        std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S %Z", &tm_local);
+    } else {
+        std::snprintf(ts, sizeof(ts), "UNKNOWN_TIME");
+    }
+
+    FILE* out = g_log_fp; // no stderr fallback
+    std::fprintf(out, "%s [%s] ", ts, prio_to_str(priority));
+    std::vfprintf(out, format, args);
+    std::fputc('\n', out);
+    std::fflush(out);
+
+    va_end(args);
+}
+
+// Macro override so all existing syslog(...) calls route through az_syslog
+#define syslog az_syslog
 
 int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
 
