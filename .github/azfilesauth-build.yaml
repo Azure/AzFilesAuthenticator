@@ -20,16 +20,20 @@ stages:
           displayName: 'Checkout Repository'
 
         - script: |
-            git status
+            set -x
+            pwd
+            git --no-pager log -n 5
             git branch
             git checkout main
-            git status
+            git --no-pager log -n 5
             echo "Building DEB package..."
             chmod +x package-deb.sh
             ./package-deb.sh
           displayName: 'Build DEB Package'
 
         - script: |
+            set -x
+            pwd
             echo "Copying DEB package to artifacts..."
             mkdir -p $(Build.ArtifactStagingDirectory)
             cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)
