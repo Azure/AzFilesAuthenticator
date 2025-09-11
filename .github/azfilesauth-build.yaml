@@ -13,7 +13,7 @@ stages:
       displayName: 'Build RPM for AzLinux'
       pool:
         vmImage: 'ubuntu-latest'
-        container: mcr.microsoft.com/azurelinux/base/core:3.0
+      container: mcr.microsoft.com/azurelinux/base/core:3.0
 
       steps:
         - checkout: self
@@ -21,6 +21,10 @@ stages:
           displayName: 'Checkout Repository'
 
         - script: |
+            set -x
+            command -v apt
+            command -v tdnf
+            command -v dnf
             sudo tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git
             tdnf clean all
             rpmdev-setuptree ~
