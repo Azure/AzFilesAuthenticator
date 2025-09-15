@@ -2,7 +2,7 @@
 set -x
 
 sudo tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git
-tdnf clean all
+sudo tdnf clean all
 
 rpmdev-setuptree ~
 # TODO: change the version number here 
