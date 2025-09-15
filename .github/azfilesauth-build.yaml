@@ -111,10 +111,12 @@ stages:
               downloadPath: $(Build.ArtifactStagingDirectory)
 
           - script: |
+              set -x
               sudo ls -lRt $(Build.ArtifactStagingDirectory)
             displayName: 'List Artifacts'
 
           - script: |
+              set -x
               sudo apt -y update
               wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
               sudo dpkg -i packages-microsoft-prod.deb
@@ -212,6 +214,7 @@ stages:
           #       ]
 
           - script: |
+              set -x
               echo "Listing unsigned artifacts in the staging directory..."
               ls $(Build.ArtifactStagingDirectory)
               chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
@@ -222,6 +225,7 @@ stages:
             displayName: 'Prepare Signed Artifacts'
           
           - script: |
+              set -x
               echo "Listing Signed Artifacts..."
               ls -R $(Build.ArtifactStagingDirectory)/signed/
             displayName: 'List Signed Artifacts'
@@ -262,29 +266,33 @@ stages:
               scriptLocation: inlineScript
               workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
               inlineScript: |
+                set -x
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
                 pmc --version
                 pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "ubuntu/22.04/prod"
-                if [ $? -ne 0 ]; then
-                  exit 1
-                fi
-                pwd
-                ls
-                find . -type f
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "mariner"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "azurelinux"
+                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "linux-3"
+                # if [ $? -ne 0 ]; then
+                #   exit 1
+                # fi
+                # pwd
+                # ls
+                # find . -type f
 
-                PKG_FILE="azfilesauth_1.0-1_amd64.deb"
-                PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
-                PMC_RELEASE_NAME="jammy"
+                # PKG_FILE="azfilesauth_1.0-1_amd64.deb"
+                # PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
+                # PMC_RELEASE_NAME="jammy"
 
-                echo uploading "$PKG_FILE" to pmc...
-                PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
-                ID_LIST=$PKG_ID
+                # echo uploading "$PKG_FILE" to pmc...
+                # PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
+                # ID_LIST=$PKG_ID
 
-                echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_RELEASE_NAME"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
-                echo "done publishing to $PMC_REPO_NAME"
+                # echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
+                # pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_RELEASE_NAME"
+                # pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
+                # echo "done publishing to $PMC_REPO_NAME"
 
 
 
