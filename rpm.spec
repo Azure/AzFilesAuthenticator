@@ -43,9 +43,11 @@ fi
 %files
 %license %{_licensedir}/%{name}/LICENSE
 %doc README.md
-%{_libdir}/libazfilesauth.so*
+%{_libdir}/libazfilesauth.*
 %{_bindir}/azfilesauthmanager
 %{_bindir}/azfilesrefresh
+%{_includedir}/azfilesauth.h
+%{_includedir}/azfilesauthversion.h
 %{python3_sitelib}/azfilesauth/
 /etc/systemd/system/azfilesrefresh.service
 %config(noreplace) /etc/azfilesauth/config.yaml
