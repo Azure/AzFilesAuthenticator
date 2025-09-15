@@ -1,7 +1,7 @@
 #!/bin/bash
 set -x
 
-sudo dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git
+sudo dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git automake
 sudo dnf clean all
 
 rpmdev-setuptree ~
