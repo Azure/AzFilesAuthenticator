@@ -36,4 +36,10 @@ if [[ -f package-rpm.sh ]]; then
     echo "Updated package-rpm.sh → ${NEW_VERSION}"
 fi
 
+# --- Update package-azlinux.sh ---
+if [[ -f package-azlinux.sh ]]; then
+    sed -i -E "s/azfilesauth-[0-9]+\.[0-9]+/azfilesauth-${NEW_VERSION}/g" package-azlinux.sh
+    echo "Updated package-azlinux.sh → ${NEW_VERSION}"
+fi
+
 echo "✅ All files updated successfully."
