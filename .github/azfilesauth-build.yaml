@@ -165,7 +165,7 @@ stages:
               AuthAKVName: '$(AuthAKVName)'
               AuthSignCertName: '$(AuthSignCertName)'
               FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm'
-              Pattern: '*azl3*.deb'
+              Pattern: '*azl3*.rpm'
               signConfigType: 'inlineSignParams'
               inlineOperation: |
                 [
