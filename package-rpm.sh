@@ -10,4 +10,5 @@ git archive --format=tar --prefix=azfilesauth-1.0/ HEAD -- . ':!debian' | gzip >
 cp rpm.spec ~/rpmbuild/SPECS/
 rpmbuild -ba ~/rpmbuild/SPECS/rpm.spec
 
+mkdir -p PACKAGES/rpm
 cp ~/rpmbuild/RPMS/x86_64/azfilesauth*.rpm PACKAGES/rpm/
