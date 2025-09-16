@@ -4,6 +4,9 @@ trigger:
 pr:
 - none
 
+variables:
+- name: checkoutBranch
+  value: release7
 
 stages: 
   - stage: BuildPackages
@@ -22,7 +25,7 @@ stages:
         - script: |
             set -x
             git branch
-            git checkout main
+            git checkout $(checkoutBranch)
             git --no-pager log -n 5
             echo "Building DEB package..."
             chmod +x package-deb.sh
@@ -58,7 +61,7 @@ stages:
         - script: |
             set -x
             git branch
-            git checkout release7
+            git checkout $(checkoutBranch)
             git --no-pager log -n 5
             echo "Building RPM (AzLinux) package..."
             chmod +x package-azlinux.sh
