@@ -267,32 +267,49 @@ stages:
               workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
               inlineScript: |
                 set -x
-                echo "1) Installing pmc-cli"
-                pip install pmc-cli
-                pmc --version
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "ubuntu/22.04/prod"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "mariner"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "azurelinux"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "linux-3"
-                # if [ $? -ne 0 ]; then
-                #   exit 1
-                # fi
-                # pwd
-                # ls
-                # find . -type f
+                set -euo pipefail
 
-                # PKG_FILE="azfilesauth_1.0-1_amd64.deb"
-                # PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
-                # PMC_RELEASE_NAME="jammy"
+                PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
+                # For test/debug: 
+                # PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
+                PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
 
-                # echo uploading "$PKG_FILE" to pmc...
-                # PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
-                # ID_LIST=$PKG_ID
+                echo "Looking for .deb files..."
+                for PKG_FILE in *.deb; do
+                  [ -e "$PKG_FILE" ] || { echo "No .deb files found. Skipping APT upload."; break; }
 
-                # echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
-                # pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_RELEASE_NAME"
-                # pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
-                # echo "done publishing to $PMC_REPO_NAME"
+                  echo "Uploading $PKG_FILE to PMC..."
+                  PKG_ID=$($PMC --id-only package upload "$PKG_FILE") || {
+                    echo "Failed to upload $PKG_FILE"
+                    exit 1
+                  }
+
+                  echo "Adding package $PKG_ID to repo microsoft-ubuntu-jammy-prod-apt"
+                  $PMC repo package update --add-packages "$PKG_ID" microsoft-ubuntu-jammy-prod-apt jammy
+
+                  echo "Publishing repo microsoft-ubuntu-jammy-prod-apt"
+                  $PMC repo publish microsoft-ubuntu-jammy-prod-apt
+                done
+
+                echo "Looking for azl3 RPM files..."
+                for PKG_FILE in *azl3*.rpm; do
+                  [ -e "$PKG_FILE" ] || { echo "No matching RPM files found. Skipping YUM upload."; break; }
+
+                  echo "Uploading $PKG_FILE to PMC..."
+                  PKG_ID=$($PMC --id-only package upload "$PKG_FILE") || {
+                    echo "Failed to upload $PKG_FILE"
+                    exit 1
+                  }
+
+                  echo "Adding package $PKG_ID to repo azurelinux-3.0-prod-ms-oss-x86_64-yum"
+                  $PMC repo package update --add-packages "$PKG_ID" azurelinux-3.0-prod-ms-oss-x86_64-yum
+
+                  echo "Publishing repo azurelinux-3.0-prod-ms-oss-x86_64-yum"
+                  $PMC repo publish azurelinux-3.0-prod-ms-oss-x86_64-yum
+                done
+
+                echo "Done publishing packages."
+
 
 
 
