@@ -4,8 +4,11 @@ trigger:
 pr:
 - none
 
+variables:
+- name: checkoutBranch
+  value: release7
 
-stages:
+stages: 
   - stage: BuildPackages
     displayName: 'Build and Package DEB/RPM Artifacts'
     jobs:
@@ -21,10 +24,8 @@ stages:
 
         - script: |
             set -x
-            pwd
-            git --no-pager log -n 5
             git branch
-            git checkout main
+            git checkout $(checkoutBranch)
             git --no-pager log -n 5
             echo "Building DEB package..."
             chmod +x package-deb.sh
@@ -46,36 +47,43 @@ stages:
             PathtoPublish: '$(Build.ArtifactStagingDirectory)'
             ArtifactName: 'azfilesauth-deb'
 
-    # - job: BuildRPM
-    #   displayName: 'Build RPM'
-    #   pool:
-    #     vmImage: 'ubuntu-latest'
 
-    #   steps:
-    #     - checkout: self
-    #       path: AzFilesAuthenticator
-    #       displayName: 'Checkout Repository'
+    - job: BuildAzLinuxRPM
+      displayName: 'Build RPM for Azure Linux 3'
+      pool:
+        name: 'azfilesauth-1es-pool'
 
-    #     - script: |
-    #         sudo apt-get install rpm -y
-    #         echo "Building RPM package..."
-    #         chmod +x package-rpm.sh
-    #         ./package-rpm.sh
-    #       displayName: 'Build RPM Package'
+      steps:
+        - checkout: self
+          path: AzFilesAuthenticator
+          displayName: 'Checkout Repository'
 
-    #     - script: |
-    #         echo "Copying RPM package to artifacts..."
-    #         mkdir -p $(Build.ArtifactStagingDirectory)
-    #         cp PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
-    #         echo "Listing Built Files..."
-    #         ls -R $(Build.ArtifactStagingDirectory)
-    #       displayName: 'Copy RPM Package to Artifacts'
+        - script: |
+            set -x
+            git branch
+            git checkout $(checkoutBranch)
+            git --no-pager log -n 5
+            echo "Building RPM (AzLinux) package..."
+            chmod +x package-azlinux.sh
+            ./package-azlinux.sh
+          displayName: 'Build RPM (AzLinux) Package'
 
-    #     - task: PublishBuildArtifacts@1
-    #       displayName: 'Publish RPM Package'
-    #       inputs:
-    #         PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    #         ArtifactName: 'azfilesauth-rpm'
+        - script: |
+            set -x
+            pwd
+            echo "Copying RPM package to artifacts..."
+            mkdir -p $(Build.ArtifactStagingDirectory)
+            rm PACKAGES/rpm/*debuginfo*
+            cp PACKAGES/rpm/*.rpm $(Build.ArtifactStagingDirectory)
+            echo "Listing Built Files..."
+            ls -R $(Build.ArtifactStagingDirectory)
+          displayName: 'Copy RPM (AzLinux) Package to Artifacts'
+
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'azfilesauth-rpm'
+
 
 
   - stage: SignArtifacts
@@ -99,17 +107,19 @@ stages:
               ArtifactName: 'azfilesauth-deb'
               downloadPath: $(Build.ArtifactStagingDirectory)
 
-          # - task: DownloadBuildArtifacts@1
-          #   displayName: 'Download RPM Artifacts'
-          #   inputs:
-          #     ArtifactName: 'azfilesauth-rpm'
-          #     downloadPath: $(Build.ArtifactStagingDirectory)
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download RPM Artifacts'
+            inputs:
+              ArtifactName: 'azfilesauth-rpm'
+              downloadPath: $(Build.ArtifactStagingDirectory)
 
           - script: |
+              set -x
               sudo ls -lRt $(Build.ArtifactStagingDirectory)
             displayName: 'List Artifacts'
 
           - script: |
+              set -x
               sudo apt -y update
               wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
               sudo dpkg -i packages-microsoft-prod.deb
@@ -147,6 +157,36 @@ stages:
               PendingAnalysisWaitTimeoutMinutes: '5'
               VerboseLogin: true
 
+          - task: EsrpCodeSigning@5
+            displayName: 'ESRP CodeSigning MI AzLinux3 RPM'
+            inputs:
+              ConnectedServiceName: 'AzFilesAuthenticator-wif'
+              AppRegistrationClientId: '$(AppRegistrationClientId)'
+              AppRegistrationTenantId: '$(AppRegistrationTenantId)'
+              EsrpClientId: '$(AppRegistrationClientId)'
+              UseMSIAuthentication: true
+              AuthAKVName: '$(AuthAKVName)'
+              AuthSignCertName: '$(AuthSignCertName)'
+              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm'
+              Pattern: '*azl3*.rpm'
+              signConfigType: 'inlineSignParams'
+              inlineOperation: |
+                [
+                {
+                  "KeyCode": "CP-459159-Pgp",
+                  "OperationCode": "LinuxSign",
+                  "ToolName": "sign",
+                  "ToolVersion": "1.0",
+                  "Parameters": {}
+                }
+                ]
+              SessionTimeout: '90'
+              MaxConcurrency: '25'
+              MaxRetryAttempts: '5'
+              PendingAnalysisWaitTimeoutMinutes: '5'
+              VerboseLogin: true
+
+
           # - task: EsrpCodeSigning@5
           #   displayName: 'ESRP CodeSigning MI RPM'
           #   inputs:
@@ -177,16 +217,18 @@ stages:
           #       ]
 
           - script: |
+              set -x
               echo "Listing unsigned artifacts in the staging directory..."
               ls $(Build.ArtifactStagingDirectory)
               chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
-              # chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
+              chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
               mkdir -p $(Build.ArtifactStagingDirectory)/signed
               cp $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb $(Build.ArtifactStagingDirectory)/signed
-              # cp $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm $(Build.ArtifactStagingDirectory)/signed
+              cp $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm $(Build.ArtifactStagingDirectory)/signed
             displayName: 'Prepare Signed Artifacts'
           
           - script: |
+              set -x
               echo "Listing Signed Artifacts..."
               ls -R $(Build.ArtifactStagingDirectory)/signed/
             displayName: 'List Signed Artifacts'
@@ -227,29 +269,54 @@ stages:
               scriptLocation: inlineScript
               workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
               inlineScript: |
+                set -x
+                set -euo pipefail
+                
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
                 pmc --version
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo list --path-contains "ubuntu/22.04/prod"
-                if [ $? -ne 0 ]; then
-                  exit 1
-                fi
-                pwd
-                ls
-                find . -type f
 
-                PKG_FILE="azfilesauth_1.0-1_amd64.deb"
-                PMC_REPO_NAME="microsoft-ubuntu-jammy-prod-apt"
-                PMC_RELEASE_NAME="jammy"
+                PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
+                # For test/debug: 
+                # PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
+                PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
 
-                echo uploading "$PKG_FILE" to pmc...
-                PKG_ID=$(pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" --id-only package upload "$PKG_FILE")
-                ID_LIST=$PKG_ID
+                echo "Looking for .deb files..."
+                for PKG_FILE in *.deb; do
+                  [ -e "$PKG_FILE" ] || { echo "No .deb files found. Skipping APT upload."; break; }
 
-                echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME'"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_RELEASE_NAME"
-                pmc --auth-type wif --base-url "https://pmc-ingest.trafficmanager.net/api/v4" repo publish "$PMC_REPO_NAME"
-                echo "done publishing to $PMC_REPO_NAME"
+                  echo "Uploading $PKG_FILE to PMC..."
+                  PKG_ID=$($PMC --id-only package upload "$PKG_FILE") || {
+                    echo "Failed to upload $PKG_FILE"
+                    exit 1
+                  }
+
+                  echo "Adding package $PKG_ID to repo microsoft-ubuntu-jammy-prod-apt"
+                  $PMC repo package update --add-packages "$PKG_ID" microsoft-ubuntu-jammy-prod-apt jammy
+
+                  echo "Publishing repo microsoft-ubuntu-jammy-prod-apt"
+                  $PMC repo publish microsoft-ubuntu-jammy-prod-apt
+                done
+
+                echo "Looking for azl3 RPM files..."
+                for PKG_FILE in *azl3*.rpm; do
+                  [ -e "$PKG_FILE" ] || { echo "No matching RPM files found. Skipping YUM upload."; break; }
+
+                  echo "Uploading $PKG_FILE to PMC..."
+                  PKG_ID=$($PMC --id-only package upload "$PKG_FILE") || {
+                    echo "Failed to upload $PKG_FILE"
+                    exit 1
+                  }
+
+                  echo "Adding package $PKG_ID to repo azurelinux-3.0-prod-ms-oss-x86_64-yum"
+                  $PMC repo package update --add-packages "$PKG_ID" azurelinux-3.0-prod-ms-oss-x86_64-yum
+
+                  echo "Publishing repo azurelinux-3.0-prod-ms-oss-x86_64-yum"
+                  $PMC repo publish azurelinux-3.0-prod-ms-oss-x86_64-yum
+                done
+
+                echo "Done publishing packages."
+
 
 
 
