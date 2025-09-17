@@ -1,3 +1,9 @@
+trigger:
+- none
+
+pr:
+- none
+
 stages:
   - stage: PublishPackages
     displayName: 'Publish Artifacts'
