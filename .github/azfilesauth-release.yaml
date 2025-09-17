@@ -16,7 +16,7 @@ stages:
             displayName: 'Download Signed Artifacts'
             inputs:
                 buildType: 'specific'
-                project: 'e92b4df8-0fcf-4cbb-b278-16216dc58e68'
+                project: 'b32aa71e-8ed2-41b2-9d77-5bc261222004'
                 pipeline: 'azfilesauthenticator'
                 buildVersionToDownload: 'latest'
                 downloadType: 'single'
@@ -26,6 +26,7 @@ stages:
           - script: |
                 set -x
                 ls $(Build.ArtifactStagingDirectory)
+                
           - task: AzureCLI@2
             displayName: 'Publish Packages'
             inputs:
