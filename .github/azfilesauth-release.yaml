@@ -28,7 +28,7 @@ stages:
                 allowFailedBuilds: true
                 allowPartiallySucceededBuilds: true
                 ArtifactName: 'azfilesauth-signed'
-                downloadPath: $(Build.ArtifactStagingDirectory)
+                downloadPath: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
           - script: |
                 set -x
@@ -46,6 +46,8 @@ stages:
                 set -x
                 set -euo pipefail
                 
+                pwd
+                ls
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
                 pmc --version
@@ -58,6 +60,7 @@ stages:
 
                 publish_package() {
                   local pkg_file="$1"
+                  ls $pkg_file
                   local repo_name="$2"
                   local release_name="${3:-}"
 
