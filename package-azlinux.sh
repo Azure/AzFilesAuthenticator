@@ -1,8 +1,8 @@
 #!/bin/bash
 set -x
 
-sudo dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git automake
-sudo dnf clean all
+sudo tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git automake
+sudo tdnf clean all
 
 rpmdev-setuptree ~
 # TODO: change the version number here 
