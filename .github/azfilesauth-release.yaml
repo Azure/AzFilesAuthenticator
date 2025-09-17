@@ -25,6 +25,7 @@ stages:
                 project: 'b32aa71e-8ed2-41b2-9d77-5bc261222004'
                 pipeline: 'azfilesauthenticator'
                 buildVersionToDownload: 'latest'
+                allowPartiallySucceededBuilds: true
                 downloadType: 'single'
                 ArtifactName: 'azfilesauth-signed'
                 downloadPath: $(Build.ArtifactStagingDirectory)
@@ -44,6 +45,7 @@ stages:
               inlineScript: |
                 set -x
                 set -euo pipefail
+                exit 1
                 
                 echo "1) Installing pmc-cli"
                 pip install pmc-cli
