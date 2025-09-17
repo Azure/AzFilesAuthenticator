@@ -26,7 +26,7 @@ fi
 
 # --- Update configure.ac ---
 if [[ -f configure.ac ]]; then
-    sed -i "s/AC_INIT(\[azfilesauth\],\[.*\],/AC_INIT([azfilesauth],[${NEW_VERSION}],/" configure.ac
+    sed -i "s/AC_INIT(\[azfilesauth\],\[.*\],/AC_INIT([azfilesauth],[${NEW_VERSION}.${NEW_RELEASE}],/" configure.ac
     echo "Updated configure.ac → ${NEW_VERSION}"
 fi
 
