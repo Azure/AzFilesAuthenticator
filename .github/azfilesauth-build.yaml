@@ -21,12 +21,12 @@ stages:
           #   releaseName: 'focal'
         
           ubuntu22:
-            poolHosted: 'microsoft'
-            vmImage: 'ubuntu-22.04'
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-ubuntu22'
             releaseName: 'jammy'
           ubuntu24:
-            poolHosted: 'microsoft'
-            vmImage: 'ubuntu-24.04'
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-ubuntu24'
             releaseName: 'noble'
           ubuntu22Arm:
             poolHosted: 'azfilesauth-1es-arm-pool'
@@ -38,9 +38,6 @@ stages:
             releaseName: 'noble'    
       
       pool:
-        ${{ if eq( variables['poolHosted'] , 'microsoft') }}:
-          vmImage: $[ variables[''vmImage'] ]
-        ${{ else }}:
           name: $[ variables['poolHosted'] ]
           demands:
             - ImageOverride -equals $[ variables['imageName'] ]
