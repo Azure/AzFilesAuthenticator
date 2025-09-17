@@ -9,23 +9,6 @@ variables:
   value: release7
 
 stages:
-  - stage: TestCommands
-    displayName: 'Testing Commands (Not required stage)'
-    jobs:
-    - job: Test
-      displayName: 'Testing'
-      pool:
-        vmImage: 'ubuntu-latest'
-
-      steps:
-        - script: |
-            set -x
-            test_fun() {
-              echo "Running from test function"
-            }
-            test_fun
-          displayName: 'Build DEB Package'
-
   - stage: BuildPackages
     displayName: 'Build and Package DEB/RPM Artifacts'
     jobs:
@@ -36,15 +19,31 @@ stages:
           # ubuntu20:
           #   vmImage: ubuntu:20.04
           #   releaseName: 'focal'
+        
           ubuntu22:
+            poolHosted: 'microsoft'
             vmImage: 'ubuntu-22.04'
             releaseName: 'jammy'
           ubuntu24:
+            poolHosted: 'microsoft'
             vmImage: 'ubuntu-24.04'
             releaseName: 'noble'
+          ubuntu22Arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-ubuntu22-arm'
+            releaseName: 'jammy'
+          ubuntu24Arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-ubuntu24-arm'
+            releaseName: 'noble'    
       
       pool:
-        vmImage: $[ variables['vmImage'] ]
+        ${{ if eq( variables['poolHosted'] , 'microsoft') }}:
+          vmImage: $[ variables[''vmImage'] ]
+        ${{ else }}:
+          name: $[ variables['poolHosted'] ]
+          demands:
+            - ImageOverride -equals $[ variables['imageName'] ]
 
       steps:
         - checkout: self
@@ -53,6 +52,11 @@ stages:
 
         - script: |
             set -x
+            uname -m
+            if [ -f /etc/os-release ]; then
+              cat /etc/os-release
+            fi
+
             git branch
             git checkout $(checkoutBranch)
             git --no-pager log -n 5
@@ -77,6 +81,8 @@ stages:
       displayName: 'Build RPM for Azure Linux 3'
       pool:
         name: 'azfilesauth-1es-pool'
+        demands:
+            - ImageOverride -equals "azfilesauth-1es-azlinux3"
 
       steps:
         - checkout: self
@@ -85,6 +91,11 @@ stages:
 
         - script: |
             set -x
+            uname -m
+            if [ -f /etc/os-release ]; then
+              cat /etc/os-release
+            fi
+
             git branch
             git checkout $(checkoutBranch)
             git --no-pager log -n 5
