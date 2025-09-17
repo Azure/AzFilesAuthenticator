@@ -33,19 +33,18 @@ stages:
       displayName: 'Build DEB'
       strategy:
         matrix:
-          ubuntu20:
-            containerImage: ubuntu:20.04
-            releaseName: 'focal'
+          # ubuntu20:
+          #   vmImage: ubuntu:20.04
+          #   releaseName: 'focal'
           ubuntu22:
-            containerImage: ubuntu:22.04 
+            vmImage: 'ubuntu-22.04'
             releaseName: 'jammy'
           ubuntu24:
-            containerImage: ubuntu:24.04
+            vmImage: 'ubuntu-24.04'
             releaseName: 'noble'
       
-      container: $[ variables['containerImage'] ]
       pool:
-        vmImage: 'ubuntu-latest'
+        vmImage: $[ variables['vmImage'] ]
 
       steps:
         - checkout: self
