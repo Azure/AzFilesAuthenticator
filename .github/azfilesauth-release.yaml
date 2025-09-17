@@ -18,15 +18,15 @@ stages:
               artifactFeeds: 'One/AzFilesAuthenticator'
           
           # download artifacts that need to be published
-          - task: DownloadBuildArtifacts@1
+          - task: DownloadPipelineArtifact@2
             displayName: 'Download Signed Artifacts'
             inputs:
                 buildType: 'specific'
                 project: 'b32aa71e-8ed2-41b2-9d77-5bc261222004'
                 pipeline: 'azfilesauthenticator'
                 buildVersionToDownload: 'latest'
+                allowFailedBuilds: true
                 allowPartiallySucceededBuilds: true
-                downloadType: 'single'
                 ArtifactName: 'azfilesauth-signed'
                 downloadPath: $(Build.ArtifactStagingDirectory)
 
@@ -85,3 +85,6 @@ stages:
                 # publish_package azfilesauth*_amd64.noble.deb microsoft-ubuntu-noble-prod-apt noble
 
                 # publish_package azfilesauth*.azl3.x86_64.rpm azurelinux-3.0-prod-ms-oss-x86_64-yum
+
+
+
