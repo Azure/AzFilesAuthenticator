@@ -74,5 +74,5 @@ stages:
 
                 # publish_package *.focal.deb microsoft-ubuntu-focal-prod-apt focal
                 # publish_package *.jammy.deb microsoft-ubuntu-jammy-prod-apt jammy
-                # publish_package *.noble.deb microsoft-ubuntu-noble-prod-apt noble
+                publish_package *.noble.deb microsoft-ubuntu-noble-prod-apt noble
                 # publish_package *azl3*.rpm azurelinux-3.0-prod-ms-oss-x86_64-yum
