@@ -43,7 +43,7 @@ stages:
             containerImage: ubuntu:24.04
             releaseName: 'noble'
       
-      container: $(containerImage)
+      container: $[ variables['containerImage'] ]
       pool:
         vmImage: 'ubuntu-latest'
 
@@ -60,13 +60,13 @@ stages:
 
         - script: |
             set -x
-            mkdir -p $(Build.ArtifactStagingDirectory)/$[ matrix.releaseName ]
-            cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)/$[ matrix.releaseName ]
+            mkdir -p $(Build.ArtifactStagingDirectory)/
+            cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)/
           displayName: 'Stage DEB Package'
 
         - task: PublishBuildArtifacts@1
           inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)/$[ matrix.releaseName ]'
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
             ArtifactName: 'azfilesauth-deb'
 
 
