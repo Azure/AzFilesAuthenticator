@@ -55,6 +55,8 @@ stages:
         - script: |
             set -x
             chmod +x package-deb.sh
+            apt-get update
+            apt-get install -y sudo
             ./package-deb.sh $(releaseName)
           displayName: 'Build DEB Package'
 
