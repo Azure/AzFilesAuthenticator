@@ -40,7 +40,7 @@ stages:
       pool:
           name: $[ variables['poolHosted'] ]
           demands:
-            - ImageOverride -equals $[ variables['imageName'] ]
+            - ImageOverride -equals $(imageName)
 
       steps:
         - checkout: self
