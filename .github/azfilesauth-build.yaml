@@ -76,10 +76,20 @@ stages:
 
     - job: BuildAzLinuxRPM
       displayName: 'Build RPM for Azure Linux 3'
+      strategy:
+        matrix:
+          AzLinux3_x86:
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-azlinux3'
+
+          AzLinux3_arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-azlinux3-arm'
+
       pool:
-        name: 'azfilesauth-1es-pool'
-        demands:
-            - ImageOverride -equals azfilesauth-1es-azlinux3
+          name: $[ variables['poolHosted'] ]
+          demands:
+            - ImageOverride -equals $(imageName)
 
       steps:
         - checkout: self
