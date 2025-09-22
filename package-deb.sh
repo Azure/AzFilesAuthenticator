@@ -8,7 +8,6 @@ sudo apt-get install -y git autoconf libtool build-essential python3 libcurl4-op
 sudo dpkg-buildpackage -us -uc
 
 mkdir -p PACKAGES/deb
-cp ../azfilesauth_*.deb PACKAGES/deb/
 
 
 for deb in ../azfilesauth_*.deb; do
