@@ -12,75 +12,75 @@ stages:
   - stage: BuildPackages
     displayName: 'Build and Package DEB/RPM Artifacts'
     jobs:
-    - job: BuildDEB
-      displayName: 'Build DEB'
-      strategy:
-        matrix:
-          # ubuntu20:
-          #   vmImage: ubuntu:20.04
-          #   releaseName: 'focal'
+    # - job: BuildDEB
+    #   displayName: 'Build DEB'
+    #   strategy:
+    #     matrix:
+    #       # ubuntu20:
+    #       #   vmImage: ubuntu:20.04
+    #       #   releaseName: 'focal'
         
-          ubuntu22:
-            poolHosted: 'azfilesauth-1es-pool'
-            imageName: 'azfilesauth-1es-ubuntu22'
-            releaseName: 'jammy'
-          ubuntu24:
-            poolHosted: 'azfilesauth-1es-pool'
-            imageName: 'azfilesauth-1es-ubuntu24'
-            releaseName: 'noble'
-          ubuntu22Arm:
-            poolHosted: 'azfilesauth-1es-arm-pool'
-            imageName: 'azfilesauth-1es-ubuntu22-arm'
-            releaseName: 'jammy'
-          ubuntu24Arm:
-            poolHosted: 'azfilesauth-1es-arm-pool'
-            imageName: 'azfilesauth-1es-ubuntu24-arm'
-            releaseName: 'noble'    
+    #       ubuntu22:
+    #         poolHosted: 'azfilesauth-1es-pool'
+    #         imageName: 'azfilesauth-1es-ubuntu22'
+    #         releaseName: 'jammy'
+    #       ubuntu24:
+    #         poolHosted: 'azfilesauth-1es-pool'
+    #         imageName: 'azfilesauth-1es-ubuntu24'
+    #         releaseName: 'noble'
+    #       ubuntu22Arm:
+    #         poolHosted: 'azfilesauth-1es-arm-pool'
+    #         imageName: 'azfilesauth-1es-ubuntu22-arm'
+    #         releaseName: 'jammy'
+    #       ubuntu24Arm:
+    #         poolHosted: 'azfilesauth-1es-arm-pool'
+    #         imageName: 'azfilesauth-1es-ubuntu24-arm'
+    #         releaseName: 'noble'    
       
-      pool:
-          name: $[ variables['poolHosted'] ]
-          demands:
-            - ImageOverride -equals $(imageName)
+    #   pool:
+    #       name: $[ variables['poolHosted'] ]
+    #       demands:
+    #         - ImageOverride -equals $(imageName)
 
-      steps:
-        - checkout: self
-          path: AzFilesAuthenticator
-          displayName: 'Checkout Repository'
+    #   steps:
+    #     - checkout: self
+    #       path: AzFilesAuthenticator
+    #       displayName: 'Checkout Repository'
 
-        - script: |
-            set -x
-            uname -m
-            if [ -f /etc/os-release ]; then
-              cat /etc/os-release
-            fi
+    #     - script: |
+    #         set -x
+    #         uname -m
+    #         if [ -f /etc/os-release ]; then
+    #           cat /etc/os-release
+    #         fi
 
-            git branch
-            git checkout $(checkoutBranch)
-            git --no-pager log -n 5
-            echo "Building DEB package..."
-            chmod +x package-deb.sh
-            ./package-deb.sh $(releaseName)
-          displayName: 'Build DEB Package'
+    #         git branch
+    #         git checkout $(checkoutBranch)
+    #         git --no-pager log -n 5
+    #         echo "Building DEB package..."
+    #         chmod +x package-deb.sh
+    #         ./package-deb.sh $(releaseName)
+    #       displayName: 'Build DEB Package'
 
-        - script: |
-            set -x
-            mkdir -p $(Build.ArtifactStagingDirectory)/
-            cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)/
-          displayName: 'Stage DEB Package'
+    #     - script: |
+    #         set -x
+    #         mkdir -p $(Build.ArtifactStagingDirectory)/
+    #         cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)/
+    #       displayName: 'Stage DEB Package'
 
-        - task: PublishBuildArtifacts@1
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-            ArtifactName: 'azfilesauth-deb'
+    #     - task: PublishBuildArtifacts@1
+    #       inputs:
+    #         PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    #         ArtifactName: 'azfilesauth-deb'
 
 
     - job: BuildAzLinuxRPM
       displayName: 'Build RPM for Azure Linux 3'
       strategy:
         matrix:
-          AzLinux3_x86:
-            poolHosted: 'azfilesauth-1es-pool'
-            imageName: 'azfilesauth-1es-azlinux3'
+          # AzLinux3_x86:
+          #   poolHosted: 'azfilesauth-1es-pool'
+          #   imageName: 'azfilesauth-1es-azlinux3'
 
           AzLinux3_arm:
             poolHosted: 'azfilesauth-1es-arm-pool'
