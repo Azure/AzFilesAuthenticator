@@ -13,9 +13,9 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "codeql-setup-test" ]
+    branches: [ "rajasi3010-patch-1" ]
   pull_request:
-    branches: [ "codeql-setup-test" ]
+    branches: [ "rajasi3010-patch-1" ]
   schedule:
     - cron: '37 22 * * 1'
 
