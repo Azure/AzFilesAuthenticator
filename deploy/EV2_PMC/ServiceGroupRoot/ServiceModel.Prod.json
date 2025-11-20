@@ -19,20 +19,18 @@
         {
           "name": "PMC.Shell",
           "composedOf": {
-            "extension": {
-              "rolloutParametersPath": "Parameters/RolloutParameters.ShellExt.json",
-              "shell": [
-                {
-                  "type": "Ubuntu20",
-                  "properties": {
-                    "imageName": "adm-ubuntu-2004-l",
-                    "imageVersion": "v7",
-                    "cpu": "2",
-                    "memoryInGb": "2.0"
-                  }
-                }
-              ]
-            }
+              "extension": {
+                  "rolloutParametersPath": "Parameters/RolloutParameters.ShellExt.json",
+                  "shell": [
+                      {
+                          "type": "mariner2",
+                          "properties": {
+                              "imageName": "adm-mariner-20-l",
+                              "imageVersion": "v14"
+                          }
+                      }
+                  ]
+              }
           }
         }
       ]
