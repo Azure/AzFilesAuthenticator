@@ -2,7 +2,10 @@
 # Ev2 Shell Extension wrapper script
 # usage: 'start.sh [rollback]'
 
-set -e
+set -ex
+
+pwd
+ls
 
 echo "1) Install PMC CLI"
 python3 -V
@@ -11,6 +14,48 @@ pip3 install python_dl/*.whl
 echo "2) Test pmc-cli"
 which pmc
 pmc -d -c settings.toml repo list --name "$PMC_REPO_NAME" || exit 1
+
+# echo "1) Installing pmc-cli"
+# pip install pmc-cli
+# pmc --version
+
+PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
+# For test/debug: 
+# PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
+PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
+$PMC repo list --path-contains "noble"
+
+publish_package() {
+    local pattern="$1"
+    local repo_name="$2"
+    local release_name="${3:-}"
+
+    local files=( $pattern )
+
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "No files matched pattern: $pattern"
+        exit 1
+    fi
+
+    echo "Uploading ${files[*]} to PMC..."
+    PKG_ID=$($PMC --id-only package upload "${files[@]}") || {
+        echo "Failed to upload ${files[*]}"
+            exit 1
+        }
+
+    if [ -n "$release_name" ]; then
+        echo "Adding package(s) $PKG_ID to repo $repo_name (release=$release_name)"
+        $PMC repo package update --add-packages "$PKG_ID" "$repo_name" "$release_name"
+    else
+        echo "Adding package(s) $PKG_ID to repo $repo_name"
+        $PMC repo package update --add-packages "$PKG_ID" "$repo_name"
+    fi
+
+    echo "Publishing repo $repo_name"
+    $PMC repo publish "$repo_name"
+}
+
+
 
 if [ "$1" = "rollback" ]; then
     echo "3) Remove packages"
@@ -32,28 +77,15 @@ if [ "$1" = "rollback" ]; then
     echo "4) Repo publish"
     pmc -c settings.toml repo publish "$PMC_REPO_NAME"
 else
-    echo "3) Upload packages"
-    ls -l packages/
-    ID_LIST=""
-    for PKG_FILE in packages/*.deb packages/*.rpm; do
-        if [ -f "$PKG_FILE" ]; then
-            PKG_ID=$(pmc -c settings.toml --id-only package upload "$PKG_FILE")
-            echo "file '$PKG_FILE' uploaded => PKG_ID=$PKG_ID"
-            if [ -z "$ID_LIST" ]; then
-                ID_LIST=$PKG_ID
-            else
-                ID_LIST="$ID_LIST,$PKG_ID"
-            fi
-        fi
-    done
-    echo "4) Add packages to repo and publish"
-    if [ -n "$ID_LIST" ]; then
-        echo "adding packages '$ID_LIST' to repo '$PMC_REPO_NAME' dist '$PMC_REPO_DIST'"
-        pmc -c settings.toml repo package update --add-packages "$ID_LIST" "$PMC_REPO_NAME" "$PMC_REPO_DIST"
-        echo "repo publish"
-        pmc -c settings.toml repo publish "$PMC_REPO_NAME"
-    else
-        echo "no packages added to the repo"
-        exit 1
-    fi
+    echo "Publish amd deb packages"
+    # publish_package "azfilesauth*_amd64.focal.deb" microsoft-ubuntu-focal-prod-apt focal
+    # publish_package "azfilesauth*_amd64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy
+    # publish_package "azfilesauth*_amd64.noble.deb" microsoft-ubuntu-noble-prod-apt noble
+
+    # echo "Publish arm deb packages"
+    # publish_package "azfilesauth*_arm64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy
+    # publish_package "azfilesauth*_arm64.noble.deb" microsoft-ubuntu-noble-prod-apt noble
+
+    # publish_package "azfilesauth*.azl3.x86_64.rpm" azurelinux-3.0-prod-ms-oss-x86_64-yum
+    # publish_package "azfilesauth*.azl3.aarch64.rpm" azurelinux-3.0-prod-ms-oss-aarch64-yum
 fi
