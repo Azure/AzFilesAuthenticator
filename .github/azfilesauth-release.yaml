@@ -12,12 +12,9 @@ extends:
   template: v2/OneBranch.Official.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
   parameters:
     stages:
-    - stage: 'Prod_Deploy'      
-      displayName: 'Deployment to production'
+    - stage: 'Get_Artifacts'
+      displayName: 'Obtaining EV2 artifacts'
       dependsOn: []
-      variables:
-        ob_release_environment: Production
-        
       jobs:
       - job: PublishUsingPMC_MI
         pool:
@@ -40,23 +37,31 @@ extends:
                 allowPartiallySucceededBuilds: true
                 ArtifactName: 'azfilesauth-signed'
                 downloadPath: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
-      # - job: ReleaseJob
-      #   templateContext: # We highly recommend downloading artifacts by specifying the artifact via template context inputs. This is in line with how artifacts are downloaded in other release categories and will auto-inject SBOM validation.
-      #         inputs:
-      #         - input: pipelineArtifact
-      #           pipeline: PackageNamespaceValidation-Official
-      #           artifactName: drop_build_build
-      #   pool:          
-      #     type: release          
-      #   steps:       
-      #     - task: vsrm-ev2.vss-services-ev2.adm-release-task.ExpressV2Internal@1
-      #       inputs:
-      #         UseServerMonitorTask: false
-      #         EnableStrictValidation: false
-      #         ValidateOnly: false
-      #         EndpointProviderType: ApprovalService
-      #         ApprovalServiceEnvironment: Production
-      #         ServiceRootLocation: 'LinkedArtifact'
-      #         RolloutSpecType: 'RSPath'
-      #         ServiceRootPath: '$(Pipeline.Workspace)/PackageNamespaceValidation-Official/drop_buildStage_buildJob/ServiceGroupRoot'
-      #         RolloutSpecPath: '$(Pipeline.Workspace)/PackageNamespaceValidation-Official/drop_buildStage_buildJob/ServiceGroupRoot/EV2Specs/PackageNamespaceValidationService/Targets/Prod/EastUs2/PackageNamespaceValidationService.Prod.EastUs2.RolloutSpec.json'
+
+      
+    # - stage: 'Prod_Deploy'      
+    #   displayName: 'Deployment to production'
+    #   dependsOn: []
+    #   variables:
+    #     ob_release_environment: Production
+    #   jobs:  
+    #   - job: ReleaseJob
+    #     templateContext: # We highly recommend downloading artifacts by specifying the artifact via template context inputs. This is in line with how artifacts are downloaded in other release categories and will auto-inject SBOM validation.
+    #           inputs:
+    #           - input: pipelineArtifact
+    #             pipeline: 'azfilesauthenticator'
+    #             artifactName: 'azfilesauth-signed'
+    #     pool:          
+    #       type: release
+    #     steps:
+    #       - task: vsrm-ev2.vss-services-ev2.adm-release-task.ExpressV2Internal@1
+    #         inputs:
+    #           UseServerMonitorTask: false
+    #           EnableStrictValidation: false
+    #           ValidateOnly: false
+    #           EndpointProviderType: ApprovalService
+    #           ApprovalServiceEnvironment: Production
+    #           ServiceRootLocation: 'LinkedArtifact'
+    #           RolloutSpecType: 'RSPath'
+    #           ServiceRootPath: '$(Pipeline.Workspace)/PackageNamespaceValidation-Official/drop_buildStage_buildJob/ServiceGroupRoot'
+    #           RolloutSpecPath: '$(Pipeline.Workspace)/PackageNamespaceValidation-Official/drop_buildStage_buildJob/ServiceGroupRoot/EV2Specs/PackageNamespaceValidationService/Targets/Prod/EastUs2/PackageNamespaceValidationService.Prod.EastUs2.RolloutSpec.json'
