@@ -282,8 +282,8 @@ stages:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
               ArtifactName: 'azfilesauth-signed'
 
-  - stage: PublishArtifacts
-    displayName: 'Publish Artifacts'
+  - stage: PublishEv2Artifacts
+    displayName: 'Publish EV2 Artifacts'
     dependsOn: SignArtifacts
     condition: succeeded('SignArtifacts')
     jobs:
