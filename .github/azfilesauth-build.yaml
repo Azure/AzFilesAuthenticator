@@ -282,20 +282,23 @@ stages:
               PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
               ArtifactName: 'azfilesauth-signed'
 
-  - stage: PublishPackages
+  - stage: PublishArtifacts
     displayName: 'Publish Artifacts'
     dependsOn: SignArtifacts
     condition: succeeded('SignArtifacts')
     jobs:
-      - job: PublishUsingPMC_MI
+      - job: BuildEV2Artifacts
+        timeoutInMinutes: 120
+
         pool:
           vmImage: 'ubuntu-22.04'
+          # container: ubuntu:20.04
+
         steps:
-          - task: PipAuthenticate@1
-            displayName: 'Pip Authenticate'
-            inputs:
-              artifactFeeds: 'One/AzFilesAuthenticator'
-          
+          - checkout: self
+            path: AzFilesAuthenticator
+            displayName: 'Checkout Repository'
+
           # download artifacts that need to be published
           - task: DownloadBuildArtifacts@1
             displayName: 'Download Signed Artifacts'
@@ -303,174 +306,67 @@ stages:
               ArtifactName: 'azfilesauth-signed'
               downloadPath: $(Build.ArtifactStagingDirectory)
 
-          - task: AzureCLI@2
-            displayName: 'Publish Packages'
+          - task: UsePythonVersion@0
+            displayName: 'Use Python 3.8'
             inputs:
-              addSpnToEnvironment: true
-              azureSubscription: 'AzFilesAuthenticator-wif'
-              scriptType: bash
-              scriptLocation: inlineScript
-              workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
-              inlineScript: |
-                set -x
-                set -euo pipefail
-                
-                echo "1) Installing pmc-cli"
-                pip install pmc-cli
-                pmc --version
+              versionSpec: 3.8
 
-                PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
-                # For test/debug: 
-                # PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
-                PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
-
-                publish_package() {
-                  local pkg_file="$1"
-                  local repo_name="$2"
-                  local release_name="${3:-}"
-
-                  echo "Uploading $pkg_file to PMC..."
-                  PKG_ID=$($PMC --id-only package upload "$pkg_file") || {
-                    echo "Failed to upload $pkg_file"
-                    exit 1
-                  }
-
-                  if [ -n "$release_name" ]; then
-                    echo "Adding package $PKG_ID to repo $repo_name (release=$release_name)"
-                    $PMC repo package update --add-packages "$PKG_ID" "$repo_name" "$release_name"
-                  else
-                    echo "Adding package $PKG_ID to repo $repo_name"
-                    $PMC repo package update --add-packages "$PKG_ID" "$repo_name"
-                  fi
-
-                  echo "Publishing repo $repo_name"
-                  $PMC repo publish "$repo_name"
-                }
-
-                publish_package *.focal.deb microsoft-ubuntu-focal-prod-apt focal
-                publish_package *.jammy.deb microsoft-ubuntu-jammy-prod-apt jammy
-                publish_package *.noble.deb microsoft-ubuntu-noble-prod-apt noble
-                publish_package *azl3*.rpm azurelinux-3.0-prod-ms-oss-x86_64-yum
-
-                # echo "Looking for .deb files..."
-                # for PKG_FILE in *.deb; do
-                #   [ -e "$PKG_FILE" ] || { echo "No .deb files found. Skipping APT upload."; break; }
-
-                #   echo "Uploading $PKG_FILE to PMC..."
-                #   PKG_ID=$($PMC --id-only package upload "$PKG_FILE") || {
-                #     echo "Failed to upload $PKG_FILE"
-                #     exit 1
-                #   }
-
-                #   echo "Adding package $PKG_ID to repo microsoft-ubuntu-jammy-prod-apt"
-                #   $PMC repo package update --add-packages "$PKG_ID" microsoft-ubuntu-jammy-prod-apt jammy
-
-                #   echo "Publishing repo microsoft-ubuntu-jammy-prod-apt"
-                #   $PMC repo publish microsoft-ubuntu-jammy-prod-apt
-                # done
-
-                # echo "Looking for azl3 RPM files..."
-                # for PKG_FILE in *azl3*.rpm; do
-                #   [ -e "$PKG_FILE" ] || { echo "No matching RPM files found. Skipping YUM upload."; break; }
-
-                #   echo "Uploading $PKG_FILE to PMC..."
-                #   PKG_ID=$($PMC --id-only package upload "$PKG_FILE") || {
-                #     echo "Failed to upload $PKG_FILE"
-                #     exit 1
-                #   }
-
-                #   echo "Adding package $PKG_ID to repo azurelinux-3.0-prod-ms-oss-x86_64-yum"
-                #   $PMC repo package update --add-packages "$PKG_ID" azurelinux-3.0-prod-ms-oss-x86_64-yum
-
-                #   echo "Publishing repo azurelinux-3.0-prod-ms-oss-x86_64-yum"
-                #   $PMC repo publish azurelinux-3.0-prod-ms-oss-x86_64-yum
-                # done
-
-                # echo "Done publishing packages."
-
-
-
-
-      # - job: BuildEV2Artifacts
-      #   timeoutInMinutes: 120
-
-      #   pool:
-      #     vmImage: 'ubuntu-22.04'
-      #     # container: ubuntu:20.04
-
-      #   steps:
-      #     - checkout: self
-      #       path: AzFilesAuthenticator
-      #       displayName: 'Checkout Repository'
-
-      #     # download artifacts that need to be published
-      #     - task: DownloadBuildArtifacts@1
-      #       displayName: 'Download Signed Artifacts'
-      #       inputs:
-      #         ArtifactName: 'azfilesauth-signed'
-      #         downloadPath: $(Build.ArtifactStagingDirectory)
-
-      #     - task: UsePythonVersion@0
-      #       displayName: 'Use Python 3.8'
-      #       inputs:
-      #         versionSpec: 3.8
-
-      #     - task: PipAuthenticate@1
-      #       displayName: 'Pip Authenticate'
-      #       inputs:
-      #         artifactFeeds: 'One/AzFilesAuthenticator'
+          - task: PipAuthenticate@1
+            displayName: 'Pip Authenticate'
+            inputs:
+              artifactFeeds: 'One/AzFilesAuthenticator'
           
           
-      #     - task: DownloadSecureFile@1
-      #       name: settings
-      #       inputs:
-      #         secureFile: 'AzFilesAuthenticator_settings.toml'
-      #       displayName: 'Download PMC Config File'
+          - task: DownloadSecureFile@1
+            name: settings
+            inputs:
+              secureFile: 'AzFilesAuthenticator_settings.toml'
+            displayName: 'Download PMC Config File'
 
-      #     - task: DownloadSecureFile@1
-      #       name: serviceModel
-      #       inputs:
-      #        secureFile: 'AzFilesAuthenticator_ServiceModel.Prod.json'
-      #       displayName: 'Download EV2 Scope Bindings'
+          - task: DownloadSecureFile@1
+            name: serviceModel
+            inputs:
+             secureFile: 'AzFilesAuthenticator_ServiceModel.Prod.json'
+            displayName: 'Download EV2 Scope Bindings'
 
-      #     - task: DownloadSecureFile@1
-      #       name: scopebindings
-      #       inputs:
-      #        secureFile: 'AzFilesAuthenticator_scopebindings.json'
-      #       displayName: 'Download EV2 Scope Bindings'
+          - task: DownloadSecureFile@1
+            name: scopebindings
+            inputs:
+             secureFile: 'AzFilesAuthenticator_scopebindings.json'
+            displayName: 'Download EV2 Scope Bindings'
 
-      #     - bash: |
-      #         EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
-      #         SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
-      #         cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
-      #         cp $(serviceModel.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ServiceModel.Prod.json"
+          - bash: |
+              EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
+              SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
+              cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
+              cp $(serviceModel.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ServiceModel.Prod.json"
               
-      #         echo "1) Get pmc-cli"
-      #         cd "$SHEXT_BUNDLE_DIR"
-      #         mkdir python_dl
-      #         pip3 download -d python_dl pmc-cli 
-      #         # --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
+              echo "1) Get pmc-cli"
+              cd "$SHEXT_BUNDLE_DIR"
+              mkdir python_dl
+              pip3 download -d python_dl pmc-cli 
+              # --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
 
-      #         echo "2) Copy built DEB packages"
-      #         # assuming ESRP signed packages are here:
-      #         cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
-      #         mkdir "$SHEXT_BUNDLE_DIR/packages"
-      #         cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
+              echo "2) Copy built DEB packages"
+              # assuming ESRP signed packages are here:
+              cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
+              mkdir "$SHEXT_BUNDLE_DIR/packages"
+              cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
 
-      #         echo "3) Archive for the ShellExt bundle"
-      #         cd "$SHEXT_BUNDLE_DIR"
-      #         cp $(settings.secureFilePath) ./settings.toml
-      #         tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
-      #         ls -al
+              echo "3) Archive for the ShellExt bundle"
+              cd "$SHEXT_BUNDLE_DIR"
+              cp $(settings.secureFilePath) ./settings.toml
+              tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
+              ls -al
 
-      #         echo "4) Copy EV2 files to artifacts staging"
-      #         cp -rv "$EV2_DIR" "$(Build.ArtifactStagingDirectory)/"
+              echo "4) Copy EV2 files to artifacts staging"
+              cp -rv "$EV2_DIR" "$(Build.ArtifactStagingDirectory)/"
 
-      #     - task: PublishBuildArtifacts@1
-      #       displayName: 'Publish EV2_PMC Artifacts'
-      #       inputs:
-      #         PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
-      #         ArtifactName: 'EV2_PMC'
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish EV2_PMC Artifacts'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+              ArtifactName: 'EV2_PMC'
 
       # - job: Ev2Rollout
       #   displayName: 'EV2 Rollout'
