@@ -1,13 +1,21 @@
-trigger:
-- none
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: OneBranch.Pipelines/GovernedTemplates
+      ref: refs/heads/main
 
-pr:
-- none
-
-stages:
-  - stage: PublishPackages
-    displayName: 'Publish Artifacts'
-    jobs:
+  pipelines:
+    - pipeline: azfilesauthenticator
+      source: azfilesauthenticator
+extends:
+  template: v2/OneBranch.Official.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
+  parameters:
+    stages:
+    - stage: 'Get_Artifacts'
+      displayName: 'Obtaining EV2 artifacts'
+      dependsOn: []
+      jobs:
       - job: PublishUsingPMC_MI
         pool:
           vmImage: 'ubuntu-22.04'
@@ -30,75 +38,30 @@ stages:
                 ArtifactName: 'azfilesauth-signed'
                 downloadPath: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
-          - script: |
-                set -x
-                ls $(Build.ArtifactStagingDirectory)
-                
-          - task: AzureCLI@2
-            displayName: 'Publish Packages'
-            inputs:
-              addSpnToEnvironment: true
-              azureSubscription: 'AzFilesAuthenticator-wif'
-              scriptType: bash
-              scriptLocation: inlineScript
-              workingDirectory: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
-              inlineScript: |
-                set -x
-                set -euo pipefail
-                
-                pwd
-                ls
-                echo "1) Installing pmc-cli"
-                pip install pmc-cli
-                pmc --version
-
-                PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
-                # For test/debug: 
-                # PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
-                PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
-                $PMC repo list --path-contains "noble"
-
-                publish_package() {
-                    local pattern="$1"
-                    local repo_name="$2"
-                    local release_name="${3:-}"
-
-                    local files=( $pattern )
-
-                    if [ ${#files[@]} -eq 0 ]; then
-                        echo "No files matched pattern: $pattern"
-                        exit 1
-                    fi
-
-                    echo "Uploading ${files[*]} to PMC..."
-                    PKG_ID=$($PMC --id-only package upload "${files[@]}") || {
-                        echo "Failed to upload ${files[*]}"
-                        exit 1
-                    }
-
-                    if [ -n "$release_name" ]; then
-                        echo "Adding package(s) $PKG_ID to repo $repo_name (release=$release_name)"
-                        $PMC repo package update --add-packages "$PKG_ID" "$repo_name" "$release_name"
-                    else
-                        echo "Adding package(s) $PKG_ID to repo $repo_name"
-                        $PMC repo package update --add-packages "$PKG_ID" "$repo_name"
-                    fi
-
-                    echo "Publishing repo $repo_name"
-                    $PMC repo publish "$repo_name"
-                }
-
-                # echo "Publish amd deb packages"
-                # publish_package "azfilesauth*_amd64.focal.deb" microsoft-ubuntu-focal-prod-apt focal
-                # publish_package "azfilesauth*_amd64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy
-                # publish_package "azfilesauth*_amd64.noble.deb" microsoft-ubuntu-noble-prod-apt noble
-
-                # echo "Publish arm deb packages"
-                # publish_package "azfilesauth*_arm64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy
-                # publish_package "azfilesauth*_arm64.noble.deb" microsoft-ubuntu-noble-prod-apt noble
-
-                # publish_package "azfilesauth*.azl3.x86_64.rpm" azurelinux-3.0-prod-ms-oss-x86_64-yum
-                publish_package "azfilesauth*.azl3.aarch64.rpm" azurelinux-3.0-prod-ms-oss-aarch64-yum
-
-
-
+      
+    # - stage: 'Prod_Deploy'      
+    #   displayName: 'Deployment to production'
+    #   dependsOn: []
+    #   variables:
+    #     ob_release_environment: Production
+    #   jobs:  
+    #   - job: ReleaseJob
+    #     templateContext: # We highly recommend downloading artifacts by specifying the artifact via template context inputs. This is in line with how artifacts are downloaded in other release categories and will auto-inject SBOM validation.
+    #           inputs:
+    #           - input: pipelineArtifact
+    #             pipeline: 'azfilesauthenticator'
+    #             artifactName: 'azfilesauth-signed'
+    #     pool:          
+    #       type: release
+    #     steps:
+    #       - task: vsrm-ev2.vss-services-ev2.adm-release-task.ExpressV2Internal@1
+    #         inputs:
+    #           UseServerMonitorTask: false
+    #           EnableStrictValidation: false
+    #           ValidateOnly: false
+    #           EndpointProviderType: ApprovalService
+    #           ApprovalServiceEnvironment: Production
+    #           ServiceRootLocation: 'LinkedArtifact'
+    #           RolloutSpecType: 'RSPath'
+    #           ServiceRootPath: '$(Pipeline.Workspace)/PackageNamespaceValidation-Official/drop_buildStage_buildJob/ServiceGroupRoot'
+    #           RolloutSpecPath: '$(Pipeline.Workspace)/PackageNamespaceValidation-Official/drop_buildStage_buildJob/ServiceGroupRoot/EV2Specs/PackageNamespaceValidationService/Targets/Prod/EastUs2/PackageNamespaceValidationService.Prod.EastUs2.RolloutSpec.json'
