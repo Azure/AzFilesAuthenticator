@@ -136,11 +136,19 @@ def refresh_ticket(ticket):
     try:
         endpoint = get_endpoint_from_principal(ticket['server'])
         client_id = get_client_id(endpoint)
-        if client_id is None:
-            log_error(f"Skipping refresh. Client id or username not found for endpoint: {endpoint}")
-            return
+
+        # Try to get OAuth token - supports both system and user-assigned managed identity
+        # If client_id is None, will attempt system-assigned managed identity
+        # If client_id is provided, will use user-assigned managed identity
         log_status(f"Refresh token for {endpoint} initiated")
-        oauth_token = get_oauth_token(client_id)
+
+        if client_id is None:
+            log_status(f"No client_id found for {endpoint}, attempting system-assigned managed identity")
+            oauth_token = get_oauth_token()  # System-assigned managed identity
+        else:
+            log_status(f"Using client_id '{client_id}' for user-assigned managed identity")
+            oauth_token = get_oauth_token(client_id)  # User-assigned managed identity
+
         if oauth_token is None:
             raise Exception(f"Unable to obtain OAuth token for {endpoint}")
         result = azfiles_set_oauth("https://" + endpoint, oauth_token)
