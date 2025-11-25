@@ -136,11 +136,21 @@ def refresh_ticket(ticket):
     try:
         endpoint = get_endpoint_from_principal(ticket['server'])
         client_id = get_client_id(endpoint)
+        # If the mount used username=root we treat this as system-assigned identity
+        # and do not require a client_id. Otherwise we use client_id for user-assigned MI.
         if client_id is None:
-            log_error(f"Skipping refresh. Client id or username not found for endpoint: {endpoint}")
+            log_error(f"Skipping refresh. Username not found for endpoint: {endpoint}")
             return
-        log_status(f"Refresh token for {endpoint} initiated")
-        oauth_token = get_oauth_token(client_id)
+
+        log_status(f"Refresh token for {endpoint} initiated (mount username={client_id})")
+
+        if client_id == "root":
+            log_status(f"username=root for {endpoint}; using system-assigned managed identity")
+            oauth_token = get_oauth_token()  # system MI (no client_id)
+        else:
+            log_status(f"Using client_id '{client_id}' for user-assigned managed identity")
+            oauth_token = get_oauth_token(client_id)  # user-assigned MI
+
         if oauth_token is None:
             raise Exception(f"Unable to obtain OAuth token for {endpoint}")
         result = azfiles_set_oauth("https://" + endpoint, oauth_token)
