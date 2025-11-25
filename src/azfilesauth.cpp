@@ -740,6 +740,9 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
         goto out;
     }
 
+    syslog(LOG_INFO, "Received expirationTime from service: %s",
+           expiration.empty() ? "<empty>" : expiration.c_str());
+
     decoded_pair = decodeBase64(krb_ticket);
     decoded = decoded_pair.first;
     size = decoded_pair.second;
@@ -749,6 +752,32 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
 
     if (rc != 0) {
         goto out;
+    }
+
+    if (credential_expires_in_seconds && !expiration.empty()) {
+        std::string exp_copy = expiration;
+        // Remove fractional seconds if present to satisfy strptime
+        size_t dot_pos = exp_copy.find('.');
+        size_t z_pos = exp_copy.find('Z');
+        if (dot_pos != std::string::npos && z_pos != std::string::npos && dot_pos < z_pos) {
+            exp_copy.erase(dot_pos, z_pos - dot_pos);
+        }
+
+        struct tm tm_expiration = {};
+        const char* parse_result = strptime(exp_copy.c_str(), "%Y-%m-%dT%H:%M:%SZ", &tm_expiration);
+        if (parse_result != nullptr) {
+            time_t expiration_time = timegm(&tm_expiration);
+            time_t now = time(nullptr);
+            if (expiration_time > now) {
+                *credential_expires_in_seconds = static_cast<unsigned int>(expiration_time - now);
+            } else {
+                *credential_expires_in_seconds = 0;
+            }
+            syslog(LOG_INFO, "Calculated credential TTL: %u seconds",
+                   *credential_expires_in_seconds);
+        } else {
+            syslog(LOG_ERR, "Failed to parse expiration time '%s'", expiration.c_str());
+        }
     }
 
     closelog();
