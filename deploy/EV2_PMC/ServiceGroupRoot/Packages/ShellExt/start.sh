@@ -11,18 +11,27 @@ echo "1) Install PMC CLI"
 python3 -V
 pip3 install python_dl/*.whl
 
+
 echo "2) Test pmc-cli"
-which pmc
+command -v pmc
 pmc -d -c settings.toml repo list --name "$PMC_REPO_NAME" || exit 1
+
+if [ -f "$(pwd)/settings.toml" ]; then
+    mkdir -p ~/.config/pmc
+    cp "$(pwd)/settings.toml" ~/.config/pmc/
+fi
 
 # echo "1) Installing pmc-cli"
 # pip install pmc-cli
 # pmc --version
 
+# Move settings.toml into the ~/.config/pmc directory
+
 PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
 # For test/debug: 
 # PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
-PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
+# PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
+PMC="pmc"
 $PMC repo list --path-contains "noble"
 
 publish_package() {
