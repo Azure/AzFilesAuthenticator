@@ -527,6 +527,7 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
     krb_service_ticket  = parseValue(res_body, "kerberosServiceTicket");
 
     curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
     curl_global_cleanup();
     
     return 0;
