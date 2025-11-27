@@ -14,8 +14,8 @@ CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
     azfilesauthmanager set <file_endpoint_uri> <oauth_token>
-    azfilesauthmanager set <file_endpoint_uri> --system
-    azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
+    azfilesauthmanager set <file_endpoint_uri> --system [--refresh]
+    azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id> [--refresh]
     azfilesauthmanager clear <file_endpoint_uri>
     azfilesauthmanager --version
 """
@@ -171,6 +171,17 @@ def azfiles_list(is_json):
         sys.exit(1)
 
 
+def start_refresh_service():
+    try:
+        subprocess.run(["systemctl", "start", "azfilesrefresh"], check=True)
+    except FileNotFoundError:
+        print("systemctl command not found while starting azfilesrefresh service")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to start azfilesrefresh service: {e}")
+        sys.exit(1)
+
+
 def run_azfilesauthmanager():
     if len(sys.argv) < 2:
         print(USAGE_MESSAGE)
@@ -203,14 +214,19 @@ def run_azfilesauthmanager():
             azfiles_list(False)
 
     elif command == "set":
-        # Supported patterns:
-        #   set <endpoint> <token>
-        #   set <endpoint> --system
-        #   set <endpoint> --imds-client-id <client_id>
+    # Supported patterns:
+    #   set <endpoint> <token>
+    #   set <endpoint> --system [--refresh]
+    #   set <endpoint> --imds-client-id <client_id> [--refresh]
         file_endpoint_uri = None
         oauth_token = None
 
-        argv = sys.argv
+        argv = sys.argv[:]
+        refresh_requested = False
+        if "--refresh" in argv:
+            refresh_requested = True
+            argv = [arg for arg in argv if arg != "--refresh"]
+
         if len(argv) < 4:
             print(USAGE_MESSAGE)
             sys.exit(1)
@@ -227,6 +243,10 @@ def run_azfilesauthmanager():
 
         if is_system_mi and is_user_mi:
             print("Cannot specify both --system and --imds-client-id")
+            sys.exit(1)
+
+        if refresh_requested and not (is_system_mi or is_user_mi):
+            print("--refresh can only be used with managed identities (--system or --imds-client-id)")
             sys.exit(1)
 
         # User-assigned MI path
@@ -254,6 +274,8 @@ def run_azfilesauthmanager():
             oauth_token = argv[3]
 
         azfiles_set_oauth(file_endpoint_uri, oauth_token)
+        if refresh_requested:
+            start_refresh_service()
     
     elif command == "clear":
         if len(sys.argv) != 3:
