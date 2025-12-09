@@ -4,7 +4,7 @@
   "shellExtensions": [
     {
       "name": "PMCPublish",
-      "type": "Ubuntu20",
+      "type": "mariner2",
       "properties": {
         "maxExecutionTime": "PT50M",
         "useFallBackLocations": true,
@@ -31,7 +31,7 @@
     },
     {
       "name": "PMCRollback",
-      "type": "Ubuntu20",
+      "type": "mariner2",
       "properties": {
         "maxExecutionTime": "PT50M",
         "useFallBackLocations": true,
