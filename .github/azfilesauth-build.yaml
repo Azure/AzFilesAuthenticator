@@ -136,12 +136,27 @@ stages:
     jobs:
       - job: SignArtifacts
         timeoutInMinutes: 120
+        strategy:
+          matrix:      
+            ubuntu22Prod:
+              poolHosted: 'azfilesauth-prod-1es-pool'
+              imageName: 'azfilesauth-prod-1es-ubuntu22-image'
 
         pool:
-          vmImage: 'ubuntu-22.04'
+          name: $[ variables['poolHosted'] ]
+          demands:
+            - ImageOverride -equals $(imageName)
 
         steps:
           - checkout: none
+
+          - script: |
+              set +e
+              set -x
+              sudo apt install dnsutils
+              echo nslookup $(AuthAKVName).vault.azure.net
+              nslookup $(AuthAKVName).vault.azure.net
+            displayName: 'NSLookup keyvault'
 
           # download artifacts that need to be published
           - task: DownloadBuildArtifacts@1
