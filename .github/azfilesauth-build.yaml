@@ -15,11 +15,7 @@ stages:
     - job: BuildDEB
       displayName: 'Build DEB'
       strategy:
-        matrix:
-          # ubuntu20:
-          #   vmImage: ubuntu:20.04
-          #   releaseName: 'focal'
-        
+        matrix:      
           ubuntu22:
             poolHosted: 'azfilesauth-1es-pool'
             imageName: 'azfilesauth-1es-ubuntu22'
@@ -35,7 +31,7 @@ stages:
           ubuntu24Arm:
             poolHosted: 'azfilesauth-1es-arm-pool'
             imageName: 'azfilesauth-1es-ubuntu24-arm'
-            releaseName: 'noble'    
+            releaseName: 'noble' 
       
       pool:
           name: $[ variables['poolHosted'] ]
@@ -136,12 +132,31 @@ stages:
     jobs:
       - job: SignArtifacts
         timeoutInMinutes: 120
+        strategy:
+          matrix:      
+            ubuntu22Prod:
+              poolHosted: 'azfilesauth-prod-1es-pool'
+              imageName: 'azfilesauth-prod-1es-ubuntu22-image'
+              releaseName: 'jammy'
 
+      
         pool:
-          vmImage: 'ubuntu-22.04'
+            name: $[ variables['poolHosted'] ]
+            demands:
+              - ImageOverride -equals $(imageName)
+
 
         steps:
           - checkout: none
+
+          - script: |
+              set +e
+              set -x
+              sudo apt install dnsutils
+              echo nslookup $(AuthAKVName).vault.azure.net
+              nslookup $(AuthAKVName).vault.azure.net
+            displayName: 'NSLookup keyvault'
+
 
           # download artifacts that need to be published
           - task: DownloadBuildArtifacts@1
