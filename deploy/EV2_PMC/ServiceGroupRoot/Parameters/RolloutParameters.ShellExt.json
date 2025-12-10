@@ -21,6 +21,9 @@
           { "name": "PMC_REPO_NAME", "value": "__PMC_REPO_NAME__" },
           { "name": "PMC_REPO_DIST", "value": "__PMC_REPO_DIST__" }
         ],
+        "subnetIds": [
+          "/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/__PMC_MSI_RG__/providers/Microsoft.Network/virtualNetworks/azfilesauthVnet/subnets/azfilesauthSubnet"
+        ],
         "identity": {
           "type": "UserAssigned",
           "userAssignedIdentities": [
