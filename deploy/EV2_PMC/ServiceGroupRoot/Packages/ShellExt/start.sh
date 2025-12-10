@@ -39,9 +39,9 @@ publish_package() {
     local repo_name="$2"
     local release_name="${3:-}"
 
-    local files=( $pattern )
+    local files=( packages/$pattern )
 
-    if [ ${#files[@]} -eq 0 ]; then
+    if [ ! -e ${files[@]} ]; then
         echo "No files matched pattern: $pattern"
         exit 1
     fi
