@@ -111,10 +111,6 @@ stages:
             - ImageOverride -equals $(imageName)
 
       steps:
-        - checkout: self
-          path: AzFilesAuthenticator
-          displayName: 'Checkout Repository'
-
         - script: |
             set -x
             uname -m
@@ -134,7 +130,16 @@ stages:
                 echo "No supported package manager found (tdnf/dnf/yum)"
                 exit 1
             fi
+            
             sudo $PKG -y install git || true
+          displayName: "Install Git if needed"
+          
+        - checkout: self
+          path: AzFilesAuthenticator
+          displayName: 'Checkout Repository'
+
+        - script: |
+            set -x
             git branch
             git checkout $(checkoutBranch)
             git --no-pager log -n 5
