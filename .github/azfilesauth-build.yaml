@@ -117,21 +117,34 @@ stages:
             if [ -f /etc/os-release ]; then
               cat /etc/os-release
             fi
-
             if command -v tdnf >/dev/null 2>&1; then
                 echo "Azure Linux (tdnf found)"
                 PKG=tdnf
+
             elif command -v dnf >/dev/null 2>&1; then
                 echo "Other RPM distro (dnf found)"
                 PKG=dnf
+
             elif command -v yum >/dev/null 2>&1; then
+                echo "RHEL/CentOS (yum found)"
                 PKG=yum
+
+            elif command -v zypper >/dev/null 2>&1; then
+                echo "SUSE / SLES (zypper found)"
+                PKG=zypper
+
             else
-                echo "No supported package manager found (tdnf/dnf/yum)"
+                echo "No supported package manager found (tdnf/dnf/yum/zypper)"
                 exit 1
             fi
-            
-            sudo $PKG -y install git || true
+
+            # Install git with SUSE-specific handling
+            if [ "$PKG" = "zypper" ]; then
+                sudo zypper --non-interactive install git || true
+            else
+                sudo $PKG -y install git || true
+            fi
+
           displayName: "Install Git if needed"
           
         - checkout: self
