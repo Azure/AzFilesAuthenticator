@@ -367,6 +367,7 @@ stages:
               cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
               mkdir "$SHEXT_BUNDLE_DIR/packages"
               cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
+              cp -v *.rpm "$SHEXT_BUNDLE_DIR/packages/"
 
               echo "3) Archive for the ShellExt bundle"
               cd "$SHEXT_BUNDLE_DIR"
