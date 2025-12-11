@@ -81,10 +81,29 @@ stages:
           AzLinux3_x86:
             poolHosted: 'azfilesauth-1es-pool'
             imageName: 'azfilesauth-1es-azlinux3'
+          Sles15Sp7_x86:
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-sles15-sp7'
+          Rhel96_x86:
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-rhel96'
+          Rhel10_x86:
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-rhel10'
+
 
           AzLinux3_arm:
             poolHosted: 'azfilesauth-1es-arm-pool'
             imageName: 'azfilesauth-1es-azlinux3-arm'
+          Sles15Sp7_arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-sles15-sp7-arm'
+          Rhel96_arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-rhel96-arm'
+          Rhel10_arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-rhel10-arm'
 
       pool:
           name: $[ variables['poolHosted'] ]
