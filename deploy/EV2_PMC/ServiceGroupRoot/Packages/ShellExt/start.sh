@@ -32,7 +32,10 @@ PMC_BASE_URL="https://pmc-ingest.trafficmanager.net/api/v4"
 # PMC="echo pmc --auth-type wif --base-url $PMC_BASE_URL"
 # PMC="pmc --auth-type wif --base-url $PMC_BASE_URL"
 PMC="pmc"
+
 $PMC repo list --path-contains "noble"
+$PMC repo list --path-contains "rhel"
+$PMC repo list --path-contains "sles"
 
 publish_package() {
     local pattern="$1"
