@@ -23,6 +23,7 @@ fi
 
 # Package install block with SUSE-specific packages
 if [ "$PKG" = "zypper" ]; then
+    sudo zypper addrepo https://download.opensuse.org/repositories/devel:tools/15.7/devel:tools.repo
     sudo zypper --non-interactive refresh
     sudo zypper --non-interactive install \
         rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
