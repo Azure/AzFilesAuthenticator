@@ -23,15 +23,20 @@ fi
 
 # Package install block with SUSE-specific packages
 if [ "$PKG" = "zypper" ]; then
-    # echo 'repo_gpgcheck = off' | sudo tee -a /etc/zypp/zypp.conf
-    sudo zypper addrepo -G https://download.opensuse.org/repositories/devel:tools/15.7/devel:tools.repo
     sudo zypper --non-interactive refresh
     sudo zypper --non-interactive install \
-        rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
+        rpm-build autoconf libtool make gcc gcc-c++ \
         python3-devel libcurl-devel krb5-devel chrpath git automake \
         binutils glibc-devel kernel-default-devel
 
     sudo zypper --non-interactive clean --all || true
+
+    rpmdev-setuptree() {
+        local DEST="${1:-$HOME}"
+
+        mkdir -p "$DEST/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+    }
+
 
 else
     sudo $PKG -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel \
