@@ -1,6 +1,6 @@
 Name:           azfilesauth
 Version:        1.0
-Release:        1%{?dist}
+Release:        7%{?dist}
 Summary:        Azure Files Authentication Library
 License:        MIT
 Source0:        %{name}-%{version}.tar.gz
@@ -43,9 +43,11 @@ fi
 %files
 %license %{_licensedir}/%{name}/LICENSE
 %doc README.md
-%{_libdir}/libazfilesauth.so*
+%{_libdir}/libazfilesauth.*
 %{_bindir}/azfilesauthmanager
 %{_bindir}/azfilesrefresh
+%{_includedir}/azfilesauth.h
+%{_includedir}/azfilesauthversion.h
 %{python3_sitelib}/azfilesauth/
 /etc/systemd/system/azfilesrefresh.service
 %config(noreplace) /etc/azfilesauth/config.yaml

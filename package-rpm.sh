@@ -1,35 +1,48 @@
 #!/bin/bash
-set -x
+set -xeuo pipefail
 
-setup_rpmbuild_tree() {
-    local topdir="${HOME}/rpmbuild"
-    local dirs=("BUILD" "RPMS" "SOURCES" "SPECS" "SRPMS")
+if command -v tdnf >/dev/null 2>&1; then
+    echo "Azure Linux (tdnf found)"
+    PKG=tdnf
 
-    echo "Creating RPM build tree in: $topdir"
+elif command -v dnf >/dev/null 2>&1; then
+    echo "Other RPM distro (dnf found)"
+    PKG=dnf
 
-    for dir in "${dirs[@]}"; do
-        mkdir -p "${topdir}/${dir}"
-    done
+elif command -v yum >/dev/null 2>&1; then
+    echo "RHEL/CentOS (yum found)"
+    PKG=yum
 
-    echo "%_topdir ${topdir}" > "${HOME}/.rpmmacros"
-    echo "RPM build tree created successfully."
-    echo "~/.rpmmacros file set with %_topdir ${topdir}"
-}
-
-# Check if the system is Debian/apt-based
-if [ -x "$(command -v apt-get)" ] || [ -f /etc/debian_version ]; then
-    # Debian/Ubuntu system
-    sudo apt-get update
-    sudo apt-get install rpm -y
-    sudo apt-get install -y git autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev debhelper-compat
-    setup_rpmbuild_tree
+elif command -v zypper >/dev/null 2>&1; then
+    echo "SUSE / SLES (zypper found)"
+    PKG=zypper
 else
-    # Assuming it's an RPM-based system (Fedora, CentOS, RHEL, etc.)
-    sudo dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel libcurl-devel krb5-devel chrpath git
-    dnf clean all
-    rpmdev-setuptree ~
+    echo "No supported package manager found (tdnf/dnf/yum/zypper)"
+    exit 1
 fi
 
+# Package install block with SUSE-specific packages
+if [ "$PKG" = "zypper" ]; then
+    sudo zypper --non-interactive refresh
+    sudo zypper --non-interactive install \
+        rpm-build autoconf libtool make gcc gcc-c++ \
+        python3-devel libcurl-devel krb5-devel chrpath git automake \
+        binutils glibc-devel kernel-default-devel
+
+    sudo zypper --non-interactive clean --all || true
+
+    rpmdev-setuptree() {
+        local DEST="${1:-$HOME}"
+
+        mkdir -p "$DEST/rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+    }
+
+
+else
+    sudo $PKG -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel \
+        libcurl-devel krb5-devel chrpath git automake binutils glibc-devel kernel-headers
+    sudo $PKG clean all || true
+fi
 
 # TODO: change the version number here 
 git archive --format=tar --prefix=azfilesauth-1.0/ HEAD -- . ':!debian' | gzip > ~/rpmbuild/SOURCES/azfilesauth-1.0.tar.gz
@@ -37,4 +50,5 @@ cp rpm.spec ~/rpmbuild/SPECS/
 rpmbuild -ba ~/rpmbuild/SPECS/rpm.spec
 
 mkdir -p PACKAGES/rpm
-cp ~/rpmbuild/RPMS/x86_64/azfilesauth*.rpm PACKAGES/rpm/
+cp ~/rpmbuild/RPMS/*/azfilesauth*.rpm PACKAGES/rpm/
+

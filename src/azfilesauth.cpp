@@ -11,6 +11,190 @@
 #include "azfilesauth.h"
 #include <unistd.h>
 #include <syslog.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cctype>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
+
+
+// ---- Lightweight logging wrapper ----
+// Some systems may not have a running syslog daemon. In that case, allow
+// logging to a file (default: /var/log/azfilesauth.log), configurable via
+// config.yaml using keys:
+// LOG_DESTINATION: "syslog" | "file"   (optional)
+// LOG_FILE_PATH: "/var/log/azfilesauth.log" (optional)
+// Parse logging settings from config.yaml to control file vs syslog logging.
+
+static bool g_logger_initialized = false;
+static bool g_use_file_log = false;
+static FILE* g_log_fp = nullptr;
+static const char* g_default_log_path = "/var/log/azfilesauth.log";
+static std::string g_log_file_path;
+// No auto-creation; we assume parent directory exists. If not, we fall back to syslog.
+
+static std::string get_parent_dir(const std::string& path) {
+    if (path.empty()) return std::string();
+    size_t pos = path.rfind('/');
+    if (pos == std::string::npos) return std::string();
+    if (pos == 0) return std::string("/");
+    return path.substr(0, pos);
+}
+
+static bool dir_exists(const std::string& path) {
+    if (path.empty()) return false;
+    struct stat st;
+    return (::stat(path.c_str(), &st) == 0) && S_ISDIR(st.st_mode);
+}
+
+// Minimal, logging-free config reader to avoid recursion during logger init.
+static std::string read_config_value_raw(const std::string& key) {
+    std::ifstream file(CONFIG_FILE_PATH);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        size_t colon_pos = line.find(":");
+        if (colon_pos != std::string::npos) {
+            std::string found_key = line.substr(0, colon_pos);
+            std::string value = line.substr(colon_pos + 1);
+
+            // Trim whitespace and quotes
+            found_key.erase(0, found_key.find_first_not_of(" \t"));
+            if (!found_key.empty())
+                found_key.erase(found_key.find_last_not_of(" \t") + 1);
+            value.erase(0, value.find_first_not_of(" \t\""));
+            if (!value.empty())
+                value.erase(value.find_last_not_of(" \t\"") + 1);
+
+            if (found_key == key) {
+                return value;
+            }
+        }
+    }
+    return "";
+}
+
+static const char* prio_to_str(int p) {
+    switch (p) {
+        case LOG_EMERG:   return "EMERG";
+        case LOG_ALERT:   return "ALERT";
+        case LOG_CRIT:    return "CRIT";
+        case LOG_ERR:     return "ERROR";
+        case LOG_WARNING: return "WARN";
+        case LOG_NOTICE:  return "NOTICE";
+        case LOG_INFO:    return "INFO";
+        case LOG_DEBUG:   return "DEBUG";
+        default:          return "LOG";
+    }
+}
+
+static void az_logger_init() {
+    if (g_logger_initialized) return;
+
+    // Read from config file.
+    std::string dest = read_config_value_raw("LOG_DESTINATION");
+    for (char& c : dest) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (dest == "file") {
+        g_use_file_log = true;
+    } else if (dest == "syslog") {
+        g_use_file_log = false;
+    } // else: default is syslog
+
+    std::string path = read_config_value_raw("LOG_FILE_PATH");
+    g_log_file_path = !path.empty() ? path : std::string(g_default_log_path);
+
+    if (g_use_file_log) {
+        // If parent directory doesn't exist, print error to stderr and fall back to syslog
+        std::string parent = get_parent_dir(g_log_file_path);
+        if (!dir_exists(parent)) {
+            std::fprintf(stderr,
+                         "azfilesauth: log directory '%s' does not exist (LOG_FILE_PATH=%s); falling back to syslog.\n",
+                         parent.c_str(), g_log_file_path.c_str());
+            g_use_file_log = false;
+        } else {
+            // Attempt to create or open the file with default permissions (0644)
+            int fd = ::open(g_log_file_path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0644);
+            if (fd >= 0) {
+                // Ensure close-on-exec
+                if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
+                    std::fprintf(stderr,
+                                 "azfilesauth: failed to set FD_CLOEXEC on log file '%s': %s; falling back to syslog.\n",
+                                 g_log_file_path.c_str(), std::strerror(errno));
+                    ::close(fd);
+                } else {
+                    g_log_fp = fdopen(fd, "a");
+                    if (!g_log_fp) {
+                        ::close(fd);
+                    }
+                }
+            }
+            // If file cannot be opened, disable file logging to use syslog backend
+            if (!g_log_fp) {
+                g_use_file_log = false;
+            }
+        }
+    }
+
+    g_logger_initialized = true;
+}
+
+// Initialize logger once when the shared library is loaded
+extern "C" __attribute__((constructor)) void az_logger_ctor(void) {
+    az_logger_init();
+}
+
+// Cleanup on unload: close the log file if open
+extern "C" __attribute__((destructor)) void az_logger_dtor(void) {
+    if (g_log_fp) {
+        std::fflush(g_log_fp);
+        std::fclose(g_log_fp);
+        g_log_fp = nullptr;
+    }
+}
+
+// Replacement for syslog() that can write to a file.
+static void az_syslog(int priority, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    // If using syslog backend, delegate and return
+    if (!g_use_file_log) {
+        vsyslog(priority, format, args);
+        va_end(args);
+        return;
+    }
+
+    // If file logging was requested but file could not be opened, suppress output.
+    if (!g_log_fp) {
+        va_end(args);
+        return;
+    }
+
+    // Write to file with timestamp and level
+    time_t now = std::time(nullptr);
+    struct tm tm_local;
+    char ts[64] = {0};
+    if (localtime_r(&now, &tm_local)) {
+        std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S %Z", &tm_local);
+    } else {
+        std::snprintf(ts, sizeof(ts), "UNKNOWN_TIME");
+    }
+
+    FILE* out = g_log_fp; // no stderr fallback
+    std::fprintf(out, "%s [%s] ", ts, prio_to_str(priority));
+    std::vfprintf(out, format, args);
+    std::fputc('\n', out);
+    std::fflush(out);
+
+    va_end(args);
+}
+
+// Macro override so all existing syslog(...) calls route through az_syslog
+#define syslog az_syslog
 
 int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
 
@@ -343,6 +527,7 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
     krb_service_ticket  = parseValue(res_body, "kerberosServiceTicket");
 
     curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
     curl_global_cleanup();
     
     return 0;
@@ -556,6 +741,9 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
         goto out;
     }
 
+    syslog(LOG_INFO, "Received expirationTime from service: %s",
+           expiration.empty() ? "<empty>" : expiration.c_str());
+
     decoded_pair = decodeBase64(krb_ticket);
     decoded = decoded_pair.first;
     size = decoded_pair.second;
@@ -565,6 +753,32 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
 
     if (rc != 0) {
         goto out;
+    }
+
+    if (credential_expires_in_seconds && !expiration.empty()) {
+        std::string exp_copy = expiration;
+        // Remove fractional seconds if present to satisfy strptime
+        size_t dot_pos = exp_copy.find('.');
+        size_t z_pos = exp_copy.find('Z');
+        if (dot_pos != std::string::npos && z_pos != std::string::npos && dot_pos < z_pos) {
+            exp_copy.erase(dot_pos, z_pos - dot_pos);
+        }
+
+        struct tm tm_expiration = {};
+        const char* parse_result = strptime(exp_copy.c_str(), "%Y-%m-%dT%H:%M:%SZ", &tm_expiration);
+        if (parse_result != nullptr) {
+            time_t expiration_time = timegm(&tm_expiration);
+            time_t now = time(nullptr);
+            if (expiration_time > now) {
+                *credential_expires_in_seconds = static_cast<unsigned int>(expiration_time - now);
+            } else {
+                *credential_expires_in_seconds = 0;
+            }
+            syslog(LOG_INFO, "Calculated credential TTL: %u seconds",
+                   *credential_expires_in_seconds);
+        } else {
+            syslog(LOG_ERR, "Failed to parse expiration time '%s'", expiration.c_str());
+        }
     }
 
     closelog();
@@ -708,6 +922,13 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     const char* KRB5_CC_NAME;
     char *server_name = NULL;
     krb5_error_code ret;
+    time_t start_epoch = 0;
+    char start_local[64] = "N/A";
+    time_t renew_epoch = 0;
+    char renew_local[64] = "N/A";
+    time_t end_epoch = 0;
+    char end_local[64] = "N/A";
+    struct tm tm_local;
 
     // Use read_config_value to get the value of KRB5_CC_NAME
     krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
@@ -761,6 +982,35 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
                 goto out;
             }
             
+            // Prepare local (system) formatted time for start, end (expiry) and renew_till
+            start_epoch = static_cast<time_t>(creds.times.starttime ? creds.times.starttime : creds.times.authtime);
+            std::strncpy(start_local, "N/A", sizeof(start_local));
+            start_local[sizeof(start_local)-1] = '\0';
+            if (start_epoch > 0) {
+                if (localtime_r(&start_epoch, &tm_local) != nullptr) {
+                    // Example (klist style): 01/15/25 04:28:48
+                    std::strftime(start_local, sizeof(start_local), "%m/%d/%y %H:%M:%S %Z", &tm_local);
+                }
+            }
+            end_epoch = static_cast<time_t>(creds.times.endtime);
+            std::strncpy(end_local, "N/A", sizeof(end_local));
+            end_local[sizeof(end_local)-1] = '\0';
+            if (end_epoch > 0) {
+                if (localtime_r(&end_epoch, &tm_local) != nullptr) {
+                    // Example (klist style): 01/15/25 05:12:58
+                    std::strftime(end_local, sizeof(end_local), "%m/%d/%y %H:%M:%S %Z", &tm_local);
+                }
+            }
+            renew_epoch = static_cast<time_t>(creds.times.renew_till);
+            std::strncpy(renew_local, "N/A", sizeof(renew_local));
+            renew_local[sizeof(renew_local)-1] = '\0';
+            if (renew_epoch > 0) {
+                if (localtime_r(&renew_epoch, &tm_local) != nullptr) {
+                    // Example (klist style): 01/15/25 05:12:58
+                    std::strftime(renew_local, sizeof(renew_local), "%m/%d/%y %H:%M:%S %Z", &tm_local);
+                }
+            }
+
             if (is_json) {
                 if (!first) {
                     json_output << ",\n"; // Add a comma between JSON objects
@@ -771,7 +1021,9 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
                 << "    \"client\": \"" << std::string(creds.client->data->data, creds.client->data->length) << "\",\n"
                 << "    \"realm\": \"" << std::string(creds.server->realm.data, creds.server->realm.length) << "\",\n"
                 << "    \"ticket_flags\": " << creds.ticket_flags << ",\n"
-                << "    \"ticket_renew_till\": " << creds.times.renew_till << "\n"
+                << "    \"ticket_start_time\": \"" << start_local << " (epoch: " << (creds.times.starttime ? creds.times.starttime : creds.times.authtime) << ")\",\n"
+                << "    \"ticket_end_time\": \"" << end_local << " (epoch: " << creds.times.endtime << ")\",\n"
+                << "    \"ticket_renew_till\": \"" << renew_local << " (epoch: " << creds.times.renew_till << ")\"\n"
                 << "  }";
             } else {
                 std::cout << "Credential " << count << ":" << std::endl;
@@ -779,7 +1031,9 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
                 std::cout << "  Client: " << std::string(creds.client->data->data, creds.client->data->length) << std::endl;
                 std::cout << "  Realm: " << std::string(creds.server->realm.data, creds.server->realm.length) << std::endl;
                 std::cout << "  Ticket flags: " << creds.ticket_flags << std::endl;
-                std::cout << "  Ticket renew till: " << creds.times.renew_till << std::endl;
+                std::cout << "  Ticket start time: " << start_local << " (epoch: " << (creds.times.starttime ? creds.times.starttime : creds.times.authtime) << ")" << std::endl;
+                std::cout << "  Ticket end time:   " << end_local << " (epoch: " << creds.times.endtime << ")" << std::endl;
+                std::cout << "  Ticket renew till: " << renew_local << " (epoch: " << creds.times.renew_till << ")" << std::endl;
             }
             krb5_free_unparsed_name(context, server_name);
         }
@@ -854,7 +1108,7 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
     return rc;
 }
 
-void extern_smb_list_credential(bool is_json) {
+int extern_smb_list_credential(bool is_json) {
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
@@ -862,7 +1116,7 @@ void extern_smb_list_credential(bool is_json) {
     if (user_uid_str.empty()) {
         syslog(LOG_ERR, "Failed to read USER_UID from config file at %s", CONFIG_FILE_PATH);
         printf("Failed to read USER_UID from config file at %s\n", CONFIG_FILE_PATH);
-        return;
+        return -1;
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
@@ -870,9 +1124,15 @@ void extern_smb_list_credential(bool is_json) {
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         printf("Failed to switch to user UID %d: %s\n", user_uid, strerror(errno));
-        return;
+        return -1;
     }
 
     smb_list_credential(is_json, user_uid);
     seteuid(prev_uid);
+    return 0;
 }
+
+const char* extern_smb_version() {
+    return AZFILESAUTH_VERSION;
+}
+

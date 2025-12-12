@@ -11,12 +11,13 @@ import pwd
 
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 
-USAGE_MESSAGE = """
-Usage: 
-        azfilesauthmanager list
-        azfilesauthmanager set <file_endpoint_uri> <oauth_token>
-        azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
-        azfilesauthmanager clear <file_endpoint_uri>
+USAGE_MESSAGE = """Usage:
+    azfilesauthmanager list [--json]
+    azfilesauthmanager set <file_endpoint_uri> <oauth_token>
+    azfilesauthmanager set <file_endpoint_uri> --system
+    azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
+    azfilesauthmanager clear <file_endpoint_uri>
+    azfilesauthmanager --version
 """
 
 library_paths = [
@@ -41,14 +42,17 @@ lib.extern_smb_set_credential_oauth_token.argtypes = [ctypes.c_char_p, ctypes.c_
 lib.extern_smb_set_credential_oauth_token.restype = ctypes.c_int
 
 lib.extern_smb_clear_credential.argtypes = [ctypes.c_char_p]
-lib.extern_smb_clear_credential.restype = ctypes.c_int 
+lib.extern_smb_clear_credential.restype = ctypes.c_int
+lib.extern_smb_list_credential.argtypes = [ctypes.c_bool]
+lib.extern_smb_list_credential.restype = ctypes.c_int
+lib.extern_smb_version.restype = ctypes.c_char_p
 
 
 def init_new_user():
     # Create a new linux user, and get its UID from the syscall's return
     new_user = "azfilesuser"
 
-    # check if USR_UID is already populated in config file
+    # check if USER_UID is already populated in config file
     try:
         with open(CONFIG_FILE_PATH, "r") as config_file:
             for line in config_file:
@@ -93,21 +97,29 @@ def init_new_user():
     return new_user_uid
 
 
-def get_oauth_token(client_id):
-    url = f"http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com&client_id={client_id}"
+def get_oauth_token(client_id=None):
+    # IMDS: system-assigned (no client_id) or user-assigned (with client_id)
+    base = "http://169.254.169.254/metadata/identity/oauth2/token"
+    params = ["api-version=2018-02-01", "resource=https://storage.azure.com"]
+    if client_id:
+        params.append(f"client_id={client_id}")
+    url = base + "?" + "&".join(params)
     headers = {"Metadata": "true"}
 
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        token_data = response.json()
-        access_token = token_data.get("access_token")
-        if not access_token:
-            raise ValueError("No access token found in the response")
-        return access_token
-    
+        data = response.json()
+        tok = data.get("access_token")
+        if not tok:
+            print("Access token missing in IMDS response")
+            return None
+        return tok
     except Exception as e:
-        print(f"Error fetching OAuth token: {e}")
+        if client_id:
+            print(f"Error fetching user-assigned managed identity token: {e}")
+        else:
+            print(f"Error fetching system-assigned managed identity token: {e}")
         return None
 
 def azfiles_set_oauth(file_endpoint_uri, oauth_token):
@@ -147,7 +159,12 @@ def azfiles_clear(file_endpoint_uri):
 
 def azfiles_list(is_json):
     try:
-        result = lib.extern_smb_list_credential(is_json)
+        rc = lib.extern_smb_list_credential(is_json)
+        # The C function returns 0 on success, non-zero on error. ctypes will not raise.
+        if rc != 0:
+            # Propagate the exact code so callers / scripts can branch on it.
+            print(f"[-] Error calling AzAuthenticatorLib: {rc}")
+            sys.exit(rc)
 
     except subprocess.CalledProcessError as e:
         print(f"Error calling AzAuthenticatorLib: {e.stderr}")
@@ -186,29 +203,55 @@ def run_azfilesauthmanager():
             azfiles_list(False)
 
     elif command == "set":
+        # Supported patterns:
+        #   set <endpoint> <token>
+        #   set <endpoint> --system
+        #   set <endpoint> --imds-client-id <client_id>
+        file_endpoint_uri = None
         oauth_token = None
-        is_client_id = False
 
-        # check if the user has used the --client-id switch
-        if "--imds-client-id" in sys.argv:
-            is_client_id = True
-            if len(sys.argv) != 5:
-                print(USAGE_MESSAGE)
-                sys.exit(1)
-
-        elif len(sys.argv) != 4:
+        argv = sys.argv
+        if len(argv) < 4:
             print(USAGE_MESSAGE)
             sys.exit(1)
 
-        file_endpoint_uri = sys.argv[2]
+        file_endpoint_uri = argv[2]
 
-        if is_client_id:
-            client_id = sys.argv[4]
+        is_system_mi = False
+        is_user_mi = False
+
+        if "--system" in argv:
+            is_system_mi = True
+        if "--imds-client-id" in argv:
+            is_user_mi = True
+
+        if is_system_mi and is_user_mi:
+            print("Cannot specify both --system and --imds-client-id")
+            sys.exit(1)
+
+        # User-assigned MI path
+        if is_user_mi:
+            if len(argv) != 5:
+                print(USAGE_MESSAGE)
+                sys.exit(1)
+            client_id = argv[4]
             oauth_token = get_oauth_token(client_id)
             if oauth_token is None:
                 sys.exit(1)
+        # System-assigned MI path
+        elif is_system_mi:
+            if len(argv) != 4:  # set <endpoint> --system
+                print(USAGE_MESSAGE)
+                sys.exit(1)
+            oauth_token = get_oauth_token()
+            if oauth_token is None:
+                sys.exit(1)
         else:
-            oauth_token = sys.argv[3]
+            # Direct token form: set <endpoint> <oauth_token>
+            if len(argv) != 4:
+                print(USAGE_MESSAGE)
+                sys.exit(1)
+            oauth_token = argv[3]
 
         azfiles_set_oauth(file_endpoint_uri, oauth_token)
     
@@ -221,6 +264,10 @@ def run_azfilesauthmanager():
         # TODO - Check formats?
 
         azfiles_clear(file_endpoint_uri)
+
+    elif command == "--version":
+        v = lib.extern_smb_version()
+        print(v.decode() if isinstance(v, (bytes, bytearray)) else v)
 
     else:
         print(USAGE_MESSAGE)
