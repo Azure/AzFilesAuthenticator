@@ -23,6 +23,7 @@ fi
 
 # Package install block with SUSE-specific packages
 if [ "$PKG" = "zypper" ]; then
+    echo 'repo_gpgcheck = off' >> /etc/zypp/zypp.conf
     sudo zypper addrepo --gpg-auto-import-keys https://download.opensuse.org/repositories/devel:tools/15.7/devel:tools.repo
     sudo zypper --non-interactive refresh
     sudo zypper --non-interactive install \
