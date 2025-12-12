@@ -44,6 +44,7 @@ else
     sudo $PKG clean all || true
 fi
 
+rpmdev-setuptree ~
 # TODO: change the version number here 
 git archive --format=tar --prefix=azfilesauth-1.0/ HEAD -- . ':!debian' | gzip > ~/rpmbuild/SOURCES/azfilesauth-1.0.tar.gz
 cp rpm.spec ~/rpmbuild/SPECS/
