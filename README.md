@@ -1,15 +1,3 @@
-# Project
-
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
-
-As the maintainer of this project, please make a few updates:
-
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
-
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
@@ -32,13 +20,67 @@ trademarks or logos is subject to and must follow
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.
 
-# Azure Files Authentication Manager Library
+# Azure Files Authentication Manager
 
-The Azure Files Authentication Manager Library is a command-line utility and library designed to manage Azure Files Kerberos authentication credentials on Linux systems. This tool simplifies the process of handling authentication credentials, ensuring secure and efficient access to Azure Files.
+The Azure Files Authentication Manager is a command-line utility and library designed to manage Azure Files Kerberos authentication credentials on Linux systems. This tool simplifies the process of handling authentication credentials, ensuring secure and efficient access to Azure Files.
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Command Line Interface](#command-line-interface)
+    - [List Credentials](#list-credentials)
+    - [Set Credentials](#set-credentials)
+    - [Clear Credentials](#clear-credentials)
+- [Automatic Credential Refresh (azfilesrefresh)](#automatic-credential-refresh-azfilesrefresh)
+  - [Features](#features)
+  - [Installation & Usage](#installation--usage)
+  - [Logs](#logs)
+- [Library API Reference](#library-api-reference)
+- [Configuration](#configuration)
+- [Security Notes](#security-notes)
+- [Troubleshooting](#troubleshooting)
+- [Packaging](#packaging)
+  - [RPM Package](#rpm-package)
+  - [.deb package](#deb-package)
+- [License](#license)
 
 ## Installation
 
-To install the Azure Files Authentication Manager Library, follow these steps:
+You can install the Azure Files Authentication Manager from Microsoft packages or build it from source.
+
+### Install from Microsoft Packages (Recommended)
+
+**Azure Linux 3.0:**
+
+```bash
+sudo tdnf update
+sudo tdnf install azfilesauth
+```
+
+**Ubuntu 22.04 (Jammy):**
+
+```bash
+curl -sSL -O https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+rm packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install azfilesauth
+```
+
+**Ubuntu 24.04 (Noble):**
+
+```bash
+curl -sSL -O https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+rm packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install azfilesauth
+```
+
+### Build from Source
+
+To build and install the library from source, follow these steps:
 
 1. **Install Required Packages:**
 
@@ -48,10 +90,6 @@ To install the Azure Files Authentication Manager Library, follow these steps:
     sudo apt-get update
     sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev
     ```
-
-    > todo: add for azure linux and rhel systems (needs cifs-utils as well)
-
-    > todo: add instructions for deb and rpm package installation and required libs there as well
 
     > todo: check for /etc/krb5.conf for default_realm uncommented
     
@@ -82,7 +120,9 @@ To install the Azure Files Authentication Manager Library, follow these steps:
     KRB5_CC_NAME: /tmp/krb5cc_123
     ```
 
-    If the configuration file does not exist, the library will create it for you. If the credential cache file already exists with a different default client principal, you will need to use a different file. Any issues will be logged in `/var/log/syslog`, and you can take appropriate action based on the logged errors.
+    If the `KRB5_CC_NAME` variable is not specified, the tool will default to `/tmp/krb5cc_<uid>`, where `<uid>` is the user ID of the `azfilesuser` (or the user specified in `USER_UID`).
+
+    If the configuration file does not exist, the library will create it for you. If the credential cache file already exists with a different default client principal, you will need to use a different file. Any issues will be logged in `/var/log/syslog` (or `/var/log/messages` on RHEL/CentOS/Azure Linux), and you can take appropriate action based on the logged errors.
 
     > Todo: proper naming instructions with cruid significance
 
@@ -123,12 +163,15 @@ sudo azfilesauthmanager list
 This will result in the format:
 
 ```bash
+Using Kerberos cache: /tmp/krb5cc_1001
 Credential 1:
-  Server: cifs
-  Client: AzureFileClient@files.azure.storage.microsoft.com
-  Realm: files.azure.storage.microsoft.com
+  Server: cifs/mystorageaccount.file.core.windows.net@FILES.AZURE.STORAGE.MICROSOFT.COM
+  Client: AzureFileClient@FILES.AZURE.STORAGE.MICROSOFT.COM
+  Realm: FILES.AZURE.STORAGE.MICROSOFT.COM
   Ticket flags: 8388608
-  Ticket renew till: 1739444459
+  Ticket start time: 12/07/25 04:48:32 UTC (epoch: 1765082912)
+  Ticket end time:   12/08/25 04:45:27 UTC (epoch: 1765169127)
+  Ticket renew till: 12/08/25 04:45:27 UTC (epoch: 1765169127)
 ```
 
 If a structured output is required, it can be obtained with the --json flag
@@ -142,37 +185,109 @@ This allows third-party scripts to use the credential output. Currently, it is s
 ```json
 [
   {
-    "server": "cifs",
-    "client": "AzureFileClient@files.azure.storage.microsoft.com",
-    "realm": "files.azure.storage.microsoft.com",
+    "server": "cifs/mystorageaccount.file.core.windows.net@FILES.AZURE.STORAGE.MICROSOFT.COM",
+    "client": "AzureFileClient@FILES.AZURE.STORAGE.MICROSOFT.COM",
+    "realm": "FILES.AZURE.STORAGE.MICROSOFT.COM",
     "ticket_flags": 8388608,
-    "ticket_renew_till": 1739448700
+    "ticket_start_time": "12/07/25 04:48:32 UTC (epoch: 1765082912)",
+    "ticket_end_time": "12/08/25 04:45:27 UTC (epoch: 1765169127)",
+    "ticket_renew_till": "12/08/25 04:45:27 UTC (epoch: 1765169127)"
   }
 ]
 ```
 
 #### Set Credentials
 
-Fetches the Kerberos credentials for the specified storage account endpoint and populates the cache specified by the `KRB5_CC_NAME` variable in `/etc/azfilesauth/config.yaml`.
+Fetches the Kerberos credentials for the specified storage account endpoint and populates the cache specified by the `KRB5_CC_NAME` variable in `/etc/azfilesauth/config.yaml` (or the default cache if not specified).
 
-Using an OAuth token:
+**1. Using an OAuth token:**
+
+This method is useful when you have already obtained an OAuth token (e.g., via a service principal or user login) and want to use it to authenticate with Azure Files.
 
 ```bash
 sudo azfilesauthmanager set <file_endpoint_uri> <oauth_token>
 ```
 
-Using an IMDS client ID:
+*Example:*
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs...
+```
+
+**2. Using System Assigned Managed Identity:**
+
+If your VM has a System Assigned Managed Identity enabled and granted access to the Azure File Share, you can use the `--system` flag. The tool will automatically fetch the token from the Azure Instance Metadata Service (IMDS).
+
+```bash
+sudo azfilesauthmanager set <file_endpoint_uri> --system
+```
+
+*Example:*
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --system
+```
+
+**3. Using User Assigned Managed Identity:**
+
+If your VM has a User Assigned Managed Identity assigned, you need to provide the Client ID of that identity.
 
 ```bash
 sudo azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
 ```
 
+*Example:*
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --imds-client-id 00000000-0000-0000-0000-000000000000
+```
+
 #### Clear Credentials
 
-Clears the Kerberos credentials for the specified storage account endpoint from the cache specified by the `KRB5_CC_NAME` variable in `/etc/azfilesauth/config.yaml`.
+Clears the Kerberos credentials for the specified storage account endpoint from the cache specified by the `KRB5_CC_NAME` variable in `/etc/azfilesauth/config.yaml` (or the default cache if not specified).
 
 ```bash
 sudo azfilesauthmanager clear <file_endpoint_uri>
+```
+
+## Automatic Credential Refresh (azfilesrefresh)
+
+The `azfilesrefresh` daemon is a background service that automatically monitors and refreshes your Kerberos tickets before they expire. This ensures uninterrupted access to your Azure File Shares, especially for long-running applications or mounts.
+
+### Features
+- **Automatic Monitoring & Refresh:** Checks ticket expiration every minute and proactively refreshes tickets 5 minutes before they expire.
+- **Managed Identity Support:** Automatically detects if a mount was created using a Managed Identity (System or User Assigned) and refreshes the token accordingly.
+    - **System Assigned Managed Identity:** If the mount was created using the system-assigned identity, the daemon will automatically fetch a new token from IMDS and update the Kerberos ticket.
+    - **User Assigned Managed Identity:** If the mount was created using a user-assigned identity (via `--imds-client-id`), the daemon will use the associated Client ID to fetch the correct token and update the ticket.
+- **Systemd Integration:** Runs as a standard system service.
+
+### Installation & Usage
+
+The `azfilesrefresh` service is installed automatically with the package.
+
+**Start the service:**
+```bash
+sudo systemctl start azfilesrefresh
+```
+
+**Enable the service to start on boot:**
+```bash
+sudo systemctl enable azfilesrefresh
+```
+
+**Check the status:**
+```bash
+sudo systemctl status azfilesrefresh
+```
+
+**Stop the service:**
+```bash
+sudo systemctl stop azfilesrefresh
+```
+
+### Logs
+
+The refresh daemon logs its activities to `/var/log/azfilesrefresh.log`. You can check this file to troubleshoot issues or verify that tickets are being refreshed.
+
+```bash
+tail -f /var/log/azfilesrefresh.log
 ```
 
 ## Library API Reference
@@ -192,7 +307,7 @@ These functions are used by the command-line utility to perform the required ope
 ## Configuration
 
 - **Configuration File:** The main configuration file is located at `/etc/azfilesauth/config.yaml`.
-- **Log Files:** Log files are located at `/var/log/azfilesauthmanager.log` and `/var/log/syslog`.
+- **Log Files:** Log files are located at `/var/log/syslog` (or `/var/log/messages`).
 
 > todo: revise log files
 
@@ -202,25 +317,57 @@ These functions are used by the command-line utility to perform the required ope
 
 ## Troubleshooting
 
-If you encounter issues, you can debug the main library and command-line tool by checking the log files:
+If you encounter issues, you can debug the main library and command-line tool by checking the log files and verifying common configuration issues.
 
-- **Syslog File:** Contains logs for the main library.
+### Log Files
 
-  > todo: revise path for azure linux and others
-  
+- **Syslog File:** Contains logs for the main library, system messages, and `cifs-utils` (`/var/log/syslog` or `/var/log/messages`).
     ```bash
     sudo cat /var/log/syslog
+    # On RHEL/CentOS/Azure Linux:
+    # sudo cat /var/log/messages
     ```
 
-- **Command Line Log File:** Contains detailed log messages for the command-line tool.
-
+- **Kernel/CIFS Logs:** Contains kernel-level logs for CIFS mounts.
     ```bash
-    sudo cat /var/log/azfilesauthmanager.log
+    dmesg | grep cifs
     ```
+
+- **Refresh Daemon Log File:** Contains logs for the automatic refresh service.
+    ```bash
+    sudo tail -f /var/log/azfilesrefresh.log
+    ```
+
+### Common Issues & Solutions
+
+#### 1. Mount error(126): Required key not available
+This error usually indicates that the kernel cannot find the Kerberos key in the keyring.
+*   **Cause:** `cifs-utils` is not installed, `cifs.upcall` is not configured correctly, the Kerberos ticket in the cache has expired, or the ticket is not populated in the cache.
+*   **Solution:**
+    *   Ensure `cifs-utils` is installed: `sudo apt-get install cifs-utils` (or `dnf install cifs-utils`).
+    *   Ensure the path to `cifs.upcall` is correct (`which cifs.upcall`).
+    *   Check for expired tickets: `sudo azfilesauthmanager list`.
+    *   Use the `set` command to get and populate the Kerberos cache: `sudo azfilesauthmanager set ...`
+
+#### 2. Mount error(13): Permission denied
+This indicates authentication failure.
+*   **Cause:** The Kerberos ticket might be missing, expired, or invalid for the target storage account. Or the user/identity does not have RBAC permissions on the Azure File Share.
+*   **Solution:**
+    *   Check if you have a valid ticket: `sudo azfilesauthmanager list`.
+    *   Verify the ticket is for the correct storage account.
+    *   Ensure the identity (User/System Managed Identity or OAuth token owner) has the **"Storage File Data SMB MI Admin"** (or Reader/Elevated Contributor) role assigned on the Storage Account.
+    *   Refresh the credentials: `sudo azfilesauthmanager set <url> ...`
+
+#### 3. Managed Identity Issues
+*   **Symptom:** `azfilesauthmanager set ... --system` fails.
+*   **Solution:**
+    *   Ensure the VM has a System Assigned Managed Identity enabled in the Azure Portal.
+    *   Ensure the VM has network access to the IMDS endpoint (`169.254.169.254`).
+    *   Check `curl -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/"` to verify IMDS connectivity manually.
 
 ## Packaging
 
-- ### RPM Package
+### RPM Package
 
   Building for RPM requires a machine which uses RPM packages (RHEL, Azure Linux, etc.). The following steps were followed for preparing the RPM package:
 
@@ -246,7 +393,7 @@ If you encounter issues, you can debug the main library and command-line tool by
   Clone this repository with
   
   ```bash
-  git clone https://github.com/ritbudhiraja/sec-by-def-lib
+  git clone https://github.com/Azure/AzFilesAuthenticator
   ```
 
   Now we need to create a tarball of the source, with the root of the tarball the same name as the package name. In this example, the package name is assumed to be `azfilesauth-1.0`. The git command to directly add the source from the github repo to the RPM build tree is as follows:
@@ -346,7 +493,7 @@ If you encounter issues, you can debug the main library and command-line tool by
   sudo make install
   ```
 
-- ### .deb package
+### .deb package
 
   The required setup is already present in the `.debian` directory. From the root of the repo, run the following:
   ```bash
