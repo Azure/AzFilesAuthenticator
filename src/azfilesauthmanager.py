@@ -16,6 +16,7 @@ USAGE_MESSAGE = """Usage:
     azfilesauthmanager set <file_endpoint_uri> <oauth_token>
     azfilesauthmanager set <file_endpoint_uri> --system
     azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
+    azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file>
     azfilesauthmanager clear <file_endpoint_uri>
     azfilesauthmanager --version
 """
@@ -122,6 +123,37 @@ def get_oauth_token(client_id=None):
             print(f"Error fetching system-assigned managed identity token: {e}")
         return None
 
+def get_workload_identity_token(tenant_id, client_id, token_file):
+    if not all([tenant_id, client_id, token_file]):
+        print("Error: Missing parameters for Workload Identity.")
+        return None
+
+    try:
+        with open(token_file, 'r') as f:
+            client_assertion = f.read().strip()
+    except Exception as e:
+        print(f"Error reading federated token file: {e}")
+        return None
+
+    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "client_id": client_id,
+        "scope": "https://storage.azure.com/.default",
+        "grant_type": "client_credentials",
+        "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        "client_assertion": client_assertion
+    }
+
+    try:
+        response = requests.post(url, headers=headers, data=data, timeout=10)
+        response.raise_for_status()
+        return response.json().get("access_token")
+    except Exception as e:
+        print(f"Error fetching Workload Identity token: {e}")
+        return None
+
+
 def azfiles_set_oauth(file_endpoint_uri, oauth_token):
 
     validity_in_sec = ctypes.c_uint()
@@ -219,14 +251,17 @@ def run_azfilesauthmanager():
 
         is_system_mi = False
         is_user_mi = False
+        is_workload_identity = False
 
         if "--system" in argv:
             is_system_mi = True
         if "--imds-client-id" in argv:
             is_user_mi = True
+        if "--workload-identity" in argv:
+            is_workload_identity = True
 
-        if is_system_mi and is_user_mi:
-            print("Cannot specify both --system and --imds-client-id")
+        if sum([is_system_mi, is_user_mi, is_workload_identity]) > 1:
+            print("Cannot specify more than one of --system, --imds-client-id, or --workload-identity")
             sys.exit(1)
 
         # User-assigned MI path
@@ -244,6 +279,31 @@ def run_azfilesauthmanager():
                 print(USAGE_MESSAGE)
                 sys.exit(1)
             oauth_token = get_oauth_token()
+            if oauth_token is None:
+                sys.exit(1)
+        # Workload Identity path
+        elif is_workload_identity:
+            tenant_id = None
+            client_id = None
+            token_file = None
+
+            try:
+                if "--tenant-id" in argv:
+                    tenant_id = argv[argv.index("--tenant-id") + 1]
+                if "--client-id" in argv:
+                    client_id = argv[argv.index("--client-id") + 1]
+                if "--token-file" in argv:
+                    token_file = argv[argv.index("--token-file") + 1]
+            except IndexError:
+                print(USAGE_MESSAGE)
+                sys.exit(1)
+
+            if not all([tenant_id, client_id, token_file]):
+                print("Missing required parameters for workload identity.")
+                print(USAGE_MESSAGE)
+                sys.exit(1)
+
+            oauth_token = get_workload_identity_token(tenant_id, client_id, token_file)
             if oauth_token is None:
                 sys.exit(1)
         else:
