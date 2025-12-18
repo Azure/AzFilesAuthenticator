@@ -6,7 +6,7 @@ pr:
 
 variables:
 - name: checkoutBranch
-  value: release7
+  value: main
 
 stages:
   - stage: BuildPackages
