@@ -41,5 +41,11 @@ if [[ -f package-azlinux.sh ]]; then
     sed -i -E "s/azfilesauth-[0-9]+\.[0-9]+/azfilesauth-${NEW_VERSION}/g" package-azlinux.sh
     echo "Updated package-azlinux.sh → ${NEW_VERSION}"
 fi
+if [[ -f deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh ]]; then
+    sed -i -E "s/[0-9]+\.[0-9]+-[0-9]+/${DEB_VERSION}/g"  deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
+    tail -n 5 deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
+
+    echo "Updated start.sh → ${DEB_VERSION}"
+fi
 
 echo "✅ All files updated successfully."

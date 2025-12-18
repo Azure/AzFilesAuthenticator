@@ -1,6 +1,6 @@
 Name:           azfilesauth
 Version:        1.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Azure Files Authentication Library
 License:        MIT
 Source0:        %{name}-%{version}.tar.gz
