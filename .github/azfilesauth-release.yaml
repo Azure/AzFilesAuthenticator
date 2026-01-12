@@ -1,0 +1,52 @@
+trigger:
+- none
+
+pr:
+- none
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: OneBranch.Pipelines/GovernedTemplates
+      ref: refs/heads/main
+
+  pipelines:
+    - pipeline: azfilesauthenticator-build
+      source: azfilesauthenticator
+      trigger: none
+      project: One
+extends:
+  template: v2/OneBranch.Official.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
+  parameters:
+    ev2ManagedSdpRolloutConfig:
+      rolloutType: normal
+      overrideManagedValidationDuration: false
+      managedValidationOverrideDurationInHours: 0
+      icmIncidentId: 0
+    stages:      
+    - stage: 'Prod_Deploy'      
+      displayName: 'Deployment to production'
+      dependsOn: []
+      variables:
+        ob_release_environment: Production
+      jobs:  
+      - job: ReleaseJob
+        displayName: "Release Job"
+        pool:          
+          type: release
+        steps:
+          - download: azfilesauthenticator-build
+            artifact: EV2_PMC
+          - task: vsrm-ev2.ev2-rollout.ev2-rollout-task.Ev2RARollout@2
+            inputs:
+              EndpointProviderType: ApprovalService
+              ApprovalServiceEnvironment: Production
+              TaskAction: RegisterAndRollout
+              SkipRegistrationIfExists: true
+              RolloutType: normal
+              ServiceRootPath: '$(Pipeline.Workspace)/azfilesauthenticator-build/EV2_PMC/ServiceGroupRoot'
+              RolloutSpecPath: '$(Pipeline.Workspace)/azfilesauthenticator-build/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
+              StageMapName: "Microsoft.Azure.SDP.Standard"
+              Select: 'regions(eastus)'
+              ForceRegistration: True
