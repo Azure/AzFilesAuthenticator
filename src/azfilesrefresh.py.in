@@ -161,6 +161,7 @@ def refresh_ticket(ticket):
 def start_daemon():
     global RUNNING
     log_status("AZ Files Refresh Daemon started.")
+    init_new_user()
     while RUNNING:
         tickets = get_tickets()
         log_status("Checking for expiring tickets...")
