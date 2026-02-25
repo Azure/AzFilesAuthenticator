@@ -1,0 +1,31 @@
+diff --git a/test/tests.py b/test/tests.py
+index a8c7ab0..8440c93 100755
+--- a/test/tests.py
++++ b/test/tests.py
+@@ -64,7 +64,7 @@ def list_credentials():
+     credentials = json.loads(str(result.stdout))
+ 
+     # select and return a list of all credentials where server: 'cifs'
+-    credentials = [cred for cred in credentials if cred["server"] == "cifs"]
++    credentials = [cred for cred in credentials if cred["server"].startswith("cifs")]
+     return credentials
+ 
+ 
+@@ -277,7 +277,7 @@ def test_second_cred_validity_post_initial_expiry(file_endpoint_uri, mount_comma
+         for cred in credentials:
+             time_left = cred["ticket_renew_till"] - int(time.time())
+             print(f"Credential: {cred}\nTime left: {time_left} seconds")
+-        cleanup(1)
++            cleanup(1)
+ 
+     print(f"    [+] Testing mount post first ticket expiry: ", end="", flush=True)
+     mount_rc = os.system(mount_command)
+@@ -368,7 +368,7 @@ def run_azfilesauthtests():
+         mnt_cmd_multichannel = f"sudo mount -t cifs {storage_acc}/{config['SHARE_NAME']} {config['MOUNT_PATH']} -o sec=krb5,cruid={config['CRUID']},multichannel,max_channels=4"
+ 
+         # # Insert Ticket to credential cache and validate mount works
+-        # test_basic_mount(file_endpoint_uri, mnt_cmd)
++        test_basic_mount(file_endpoint_uri, mnt_cmd)
+ 
+         # # Allow ticket to expire, renew ticket and validate operations work
+         test_mount_post_cred_expiry_and_renewal(file_endpoint_uri, mnt_cmd)

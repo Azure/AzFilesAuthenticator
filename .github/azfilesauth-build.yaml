@@ -238,8 +238,58 @@ stages:
               sudo apt install dotnet-sdk-9.0 -y
             displayName: "Update dependencies"
           
+          # Sort all artifacts into directories named by their signing key.
+          # To add a new distro/key: add a KEY_MAP entry below.
+          # If the new distro reuses an existing key, no new ESRP task is needed.
+          - script: |
+              set -x
+              DEFAULT_KEY="CP-450779-Pgp"
+
+              # ── Sort DEBs ──
+              DEB_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-deb"
+              declare -A DEB_KEY_MAP=(
+                # Add Ubuntu > 25.10 codenames here as they release, e.g.:
+                # ["plucky"]="CP-500207-Pgp"    # 25.10
+                # ["questing"]="CP-500207-Pgp"  # 26.04
+              )
+
+              for pattern in "${!DEB_KEY_MAP[@]}"; do
+                key="${DEB_KEY_MAP[$pattern]}"
+                mkdir -p "$DEB_DIR/$key"
+                mv $DEB_DIR/*${pattern}*.deb "$DEB_DIR/$key/" 2>/dev/null || true
+              done
+              mkdir -p "$DEB_DIR/$DEFAULT_KEY"
+              mv $DEB_DIR/*.deb "$DEB_DIR/$DEFAULT_KEY/" 2>/dev/null || true
+
+              echo "=== DEB layout ==="
+              for dir in "$DEB_DIR"/CP-*; do
+                echo "--- $(basename "$dir") ---" && ls "$dir/"
+              done
+
+              # ── Sort RPMs ──
+              RPM_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-rpm"
+              declare -A RPM_KEY_MAP=(
+                ["azl3"]="CP-459159-Pgp"
+                ["el10"]="CP-500207-Pgp"
+              )
+
+              for pattern in "${!RPM_KEY_MAP[@]}"; do
+                key="${RPM_KEY_MAP[$pattern]}"
+                mkdir -p "$RPM_DIR/$key"
+                mv $RPM_DIR/*${pattern}*.rpm "$RPM_DIR/$key/" 2>/dev/null || true
+              done
+              mkdir -p "$RPM_DIR/$DEFAULT_KEY"
+              mv $RPM_DIR/*.rpm "$RPM_DIR/$DEFAULT_KEY/" 2>/dev/null || true
+
+              echo "=== RPM layout ==="
+              for dir in "$RPM_DIR"/CP-*; do
+                echo "--- $(basename "$dir") ---" && ls "$dir/"
+              done
+            displayName: 'Sort artifacts by signing key'
+
+          # ── Sign DEBs: CP-450779-Pgp (jammy, noble, etc.) ──
           - task: EsrpCodeSigning@5
-            displayName: 'ESRP CodeSigning MI DEB'
+            displayName: 'ESRP Sign DEB (CP-450779-Pgp)'
             inputs:
               ConnectedServiceName: 'AzFilesAuthenticator-wif'
               AppRegistrationClientId: '$(AppRegistrationClientId)'
@@ -248,7 +298,7 @@ stages:
               UseMSIAuthentication: true
               AuthAKVName: '$(AuthAKVName)'
               AuthSignCertName: '$(AuthSignCertName)'
-              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-deb'
+              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-deb/CP-450779-Pgp'
               Pattern: '*.deb'
               signConfigType: 'inlineSignParams'
               inlineOperation: |
@@ -267,8 +317,41 @@ stages:
               PendingAnalysisWaitTimeoutMinutes: '5'
               VerboseLogin: true
 
+          # ── Sign DEBs: CP-500207-Pgp (Ubuntu > 25.10) ──
+          # Uncomment when the first Ubuntu > 25.10 codename is added to DEB_KEY_MAP.
+          # - task: EsrpCodeSigning@5
+          #   displayName: 'ESRP Sign DEB (CP-500207-Pgp)'
+          #   inputs:
+          #     ConnectedServiceName: 'AzFilesAuthenticator-wif'
+          #     AppRegistrationClientId: '$(AppRegistrationClientId)'
+          #     AppRegistrationTenantId: '$(AppRegistrationTenantId)'
+          #     EsrpClientId: '$(AppRegistrationClientId)'
+          #     UseMSIAuthentication: true
+          #     AuthAKVName: '$(AuthAKVName)'
+          #     AuthSignCertName: '$(AuthSignCertName)'
+          #     FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-deb/CP-500207-Pgp'
+          #     Pattern: '*.deb'
+          #     signConfigType: 'inlineSignParams'
+          #     inlineOperation: |
+          #       [
+          #       {
+          #         "KeyCode": "CP-500207-Pgp",
+          #         "OperationCode": "LinuxSign",
+          #         "ToolName": "sign",
+          #         "ToolVersion": "1.0",
+          #         "Parameters": {}
+          #       }
+          #       ]
+          #     SessionTimeout: '90'
+          #     MaxConcurrency: '25'
+          #     MaxRetryAttempts: '5'
+          #     PendingAnalysisWaitTimeoutMinutes: '5'
+          #     VerboseLogin: true
+
+          # ── Sign RPMs ──
+
           - task: EsrpCodeSigning@5
-            displayName: 'ESRP CodeSigning MI RPM'
+            displayName: 'ESRP Sign RPM (CP-450779-Pgp)'
             inputs:
               ConnectedServiceName: 'AzFilesAuthenticator-wif'
               AppRegistrationClientId: '$(AppRegistrationClientId)'
@@ -277,7 +360,7 @@ stages:
               UseMSIAuthentication: true
               AuthAKVName: '$(AuthAKVName)'
               AuthSignCertName: '$(AuthSignCertName)'
-              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm'
+              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm/CP-450779-Pgp'
               Pattern: '*.rpm'
               signConfigType: 'inlineSignParams'
               inlineOperation: |
@@ -297,7 +380,7 @@ stages:
               VerboseLogin: true
 
           - task: EsrpCodeSigning@5
-            displayName: 'ESRP CodeSigning MI AzLinux3 RPM'
+            displayName: 'ESRP Sign RPM (CP-459159-Pgp)'
             inputs:
               ConnectedServiceName: 'AzFilesAuthenticator-wif'
               AppRegistrationClientId: '$(AppRegistrationClientId)'
@@ -306,8 +389,8 @@ stages:
               UseMSIAuthentication: true
               AuthAKVName: '$(AuthAKVName)'
               AuthSignCertName: '$(AuthSignCertName)'
-              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm'
-              Pattern: '*azl3*.rpm'
+              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm/CP-459159-Pgp'
+              Pattern: '*.rpm'
               signConfigType: 'inlineSignParams'
               inlineOperation: |
                 [
@@ -324,12 +407,51 @@ stages:
               MaxRetryAttempts: '5'
               PendingAnalysisWaitTimeoutMinutes: '5'
               VerboseLogin: true
-          
+
+          - task: EsrpCodeSigning@5
+            displayName: 'ESRP Sign RPM (CP-500207-Pgp)'
+            inputs:
+              ConnectedServiceName: 'AzFilesAuthenticator-wif'
+              AppRegistrationClientId: '$(AppRegistrationClientId)'
+              AppRegistrationTenantId: '$(AppRegistrationTenantId)'
+              EsrpClientId: '$(AppRegistrationClientId)'
+              UseMSIAuthentication: true
+              AuthAKVName: '$(AuthAKVName)'
+              AuthSignCertName: '$(AuthSignCertName)'
+              FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-rpm/CP-500207-Pgp'
+              Pattern: '*.rpm'
+              signConfigType: 'inlineSignParams'
+              inlineOperation: |
+                [
+                {
+                  "KeyCode": "CP-500207-Pgp",
+                  "OperationCode": "LinuxSign",
+                  "ToolName": "sign",
+                  "ToolVersion": "1.0",
+                  "Parameters": {}
+                }
+                ]
+              SessionTimeout: '90'
+              MaxConcurrency: '25'
+              MaxRetryAttempts: '5'
+              PendingAnalysisWaitTimeoutMinutes: '5'
+              VerboseLogin: true
+
+          # Flatten artifacts back into single directories after signing
+          - script: |
+              set -x
+              DEB_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-deb"
+              find "$DEB_DIR" -mindepth 2 -name '*.deb' -exec mv {} "$DEB_DIR/" \;
+              find "$DEB_DIR" -mindepth 1 -type d -empty -delete
+
+              RPM_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-rpm"
+              find "$RPM_DIR" -mindepth 2 -name '*.rpm' -exec mv {} "$RPM_DIR/" \;
+              find "$RPM_DIR" -mindepth 1 -type d -empty -delete
+            displayName: 'Flatten signed artifacts'
 
           - script: |
               set -x
-              echo "Listing unsigned artifacts in the staging directory..."
-              ls $(Build.ArtifactStagingDirectory)
+              echo "Preparing signed artifacts..."
               chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
               chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
               mkdir -p $(Build.ArtifactStagingDirectory)/signed

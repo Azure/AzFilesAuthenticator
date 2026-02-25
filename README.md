@@ -43,6 +43,7 @@ The Azure Files Authentication Manager is a command-line utility and library des
 - [Packaging](#packaging)
   - [RPM Package](#rpm-package)
   - [.deb package](#deb-package)
+- [Testing Package Builds](#testing-package-builds)
 - [License](#license)
 
 ## Installation
@@ -505,3 +506,47 @@ This indicates authentication failure.
 ## License
 
 This project is licensed under the MIT License. For more details, see the LICENSE file included with the project.
+
+## Testing Package Builds
+
+A Docker-based test framework is provided to locally build and validate packages across all supported distros. This mirrors the CI pipeline defined in `.github/azfilesauth-build.yaml`.
+
+### Supported Distros
+
+| Distro | Package Type |
+|---|---|
+| Ubuntu 22.04 (Jammy) | DEB |
+| Ubuntu 24.04 (Noble) | DEB |
+| SLES 15 SP6 | RPM |
+| RHEL 9 | RPM |
+| Azure Linux 3 | RPM |
+
+### Usage
+
+**Test all distros:**
+
+```bash
+./test/test_package_builds.sh
+```
+
+**Test specific distros:**
+
+```bash
+./test/test_package_builds.sh sles15
+./test/test_package_builds.sh ubuntu22 rhel9
+```
+
+### What It Does
+
+For each distro, the script:
+
+1. **Builds** the package inside a Docker container (using Dockerfiles in `test/build/`)
+2. **Extracts** the built `.deb` or `.rpm` to `test/artifacts/<distro>/`
+3. **Installs** the package on a clean distro image (using Dockerfiles in `test/distro_run/`)
+4. **Validates** installed files, libraries, binaries, config, and systemd service
+5. **Runs** `azfilesauthmanager --version` and verifies the output
+
+### Prerequisites
+
+- Docker must be installed and running
+- The user must have permission to run Docker commands

@@ -1,12 +1,17 @@
 Name:           azfilesauth
 Version:        1.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Azure Files Authentication Library
 License:        MIT
 Source0:        %{name}-%{version}.tar.gz
 URL:            https://example.com
-BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath
-Requires:       curl, krb5-libs, python3
+BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
+
+%if 0%{?suse_version}
+Requires:       curl, krb5, python3, python3-requests
+%else
+Requires:       curl, krb5-libs, python3, python3-requests
+%endif
 
 %description
 Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
