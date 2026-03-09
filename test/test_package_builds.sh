@@ -59,13 +59,13 @@ fi
 
 # Validate distro names
 for distro in "${DISTROS[@]}"; do
-    if [ ! -f "$BUILD_DIR/Dockerfile.$distro" ]; then
-        echo "Error: No build Dockerfile found for '$distro' at $BUILD_DIR/Dockerfile.$distro"
+    if [ ! -f "$BUILD_DIR/$distro.containerfile" ]; then
+        echo "Error: No build containerfile found for '$distro' at $BUILD_DIR/$distro.containerfile"
         echo "Available distros: ${ALL_DISTROS[*]}"
         exit 1
     fi
-    if [ ! -f "$RUN_DIR/Dockerfile.$distro" ]; then
-        echo "Error: No run Dockerfile found for '$distro' at $RUN_DIR/Dockerfile.$distro"
+    if [ ! -f "$RUN_DIR/$distro.containerfile" ]; then
+        echo "Error: No run containerfile found for '$distro' at $RUN_DIR/$distro.containerfile"
         exit 1
     fi
 done
@@ -93,7 +93,7 @@ for distro in "${DISTROS[@]}"; do
     # --- Step 1: Build ---
     log "[$distro] Building package..."
     build_log=$(mktemp)
-    if ! docker build -f "$BUILD_DIR/Dockerfile.$distro" -t "$build_tag" "$REPO_ROOT" > "$build_log" 2>&1; then
+    if ! docker build -f "$BUILD_DIR/$distro.containerfile" -t "$build_tag" "$REPO_ROOT" > "$build_log" 2>&1; then
         tail -20 "$build_log"
         rm -f "$build_log"
         fail "[$distro] Package build failed"
@@ -131,7 +131,7 @@ for distro in "${DISTROS[@]}"; do
     # --- Step 3: Install & Validate ---
     log "[$distro] Installing and validating on clean image..."
     run_log=$(mktemp)
-    if ! docker build -f "$RUN_DIR/Dockerfile.$distro" -t "$run_tag" "$distro_artifacts" > "$run_log" 2>&1; then
+    if ! docker build -f "$RUN_DIR/$distro.containerfile" -t "$run_tag" "$distro_artifacts" > "$run_log" 2>&1; then
         tail -30 "$run_log"
         rm -f "$run_log"
         fail "[$distro] Install/validation failed"
