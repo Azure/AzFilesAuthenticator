@@ -43,7 +43,7 @@ if [[ -f package-azlinux.sh ]]; then
 fi
 if [[ -f deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh ]]; then
     sed -i -E "s/[0-9]+\.[0-9]+-[0-9]+/${DEB_VERSION}/g"  deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
-    tail -n 5 deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
+    grep 'publish_package' deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
 
     echo "Updated start.sh → ${DEB_VERSION}"
 fi
