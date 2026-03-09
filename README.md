@@ -43,6 +43,7 @@ The Azure Files Authentication Manager is a command-line utility and library des
 - [Packaging](#packaging)
   - [RPM Package](#rpm-package)
   - [.deb package](#deb-package)
+- [Developer Setup](#developer-setup)
 - [Testing Package Builds](#testing-package-builds)
 - [License](#license)
 
@@ -506,6 +507,14 @@ This indicates authentication failure.
 ## License
 
 This project is licensed under the MIT License. For more details, see the LICENSE file included with the project.
+
+## Developer Setup
+
+After cloning the repository, run the following to enable the shared git hooks (auto-increments the EV2 `version.txt` build number on each commit):
+
+```bash
+git config core.hooksPath hooks
+```
 
 ## Testing Package Builds
 
