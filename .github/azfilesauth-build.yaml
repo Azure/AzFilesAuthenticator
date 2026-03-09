@@ -4,9 +4,6 @@ trigger:
 pr:
 - none
 
-variables:
-- name: checkoutBranch
-  value: main
 
 stages:
   - stage: BuildPackages
@@ -55,7 +52,6 @@ stages:
             fi
 
             git branch
-            git checkout $(checkoutBranch)
             git --no-pager log -n 5
             echo "Building DEB package..."
             chmod +x package-deb.sh
@@ -154,7 +150,6 @@ stages:
         - script: |
             set -x
             git branch
-            git checkout $(checkoutBranch)
             git --no-pager log -n 5
             echo "Building RPM package..."
             chmod +x package-rpm.sh
