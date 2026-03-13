@@ -100,6 +100,7 @@ else
     publish_package "azfilesauth_1.0-10_amd64.noble.deb" microsoft-ubuntu-noble-prod-apt noble || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_amd64.noble.deb -> microsoft-ubuntu-noble-prod-apt (noble)"
 
     echo "Publish arm deb packages"
+    publish_package "azfilesauth_1.0-10_arm64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
     publish_package "azfilesauth_1.0-10_arm64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.jammy.deb -> microsoft-ubuntu-jammy-prod-apt (jammy)"
     publish_package "azfilesauth_1.0-10_arm64.noble.deb" microsoft-ubuntu-noble-prod-apt noble || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.noble.deb -> microsoft-ubuntu-noble-prod-apt (noble)"
 

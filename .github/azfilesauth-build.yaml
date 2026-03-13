@@ -13,10 +13,10 @@ stages:
       displayName: 'Build DEB'
       strategy:
         matrix:
-          # ubuntu20:
-          #   vmImage: ubuntu:20.04
-          #   releaseName: 'focal'
-        
+          ubuntu20:
+            poolHosted: 'azfilesauth-1es-pool'
+            imageName: 'azfilesauth-1es-ubuntu20'
+            releaseName: 'focal'
           ubuntu22:
             poolHosted: 'azfilesauth-1es-pool'
             imageName: 'azfilesauth-1es-ubuntu22'
@@ -29,10 +29,14 @@ stages:
             poolHosted: 'azfilesauth-1es-arm-pool'
             imageName: 'azfilesauth-1es-ubuntu22-arm'
             releaseName: 'jammy'
+          ubuntu20Arm:
+            poolHosted: 'azfilesauth-1es-arm-pool'
+            imageName: 'azfilesauth-1es-ubuntu20-arm'
+            releaseName: 'focal'
           ubuntu24Arm:
             poolHosted: 'azfilesauth-1es-arm-pool'
             imageName: 'azfilesauth-1es-ubuntu24-arm'
-            releaseName: 'noble'    
+            releaseName: 'noble'
       
       pool:
           name: $[ variables['poolHosted'] ]
