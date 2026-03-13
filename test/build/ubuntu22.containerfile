@@ -15,6 +15,7 @@ COPY . /build/
 RUN autoreconf -fi && \
     rm -f ../azfilesauth_*.deb && \
     dpkg-buildpackage -us -uc && \
+    rm -rf /build/PACKAGES && \
     mkdir -p /build/PACKAGES/deb && \
     for deb in ../azfilesauth_*.deb; do \
         base=$(basename "$deb" .deb); \

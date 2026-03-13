@@ -1,10 +1,10 @@
-# Build azfilesauth RPM on Azure Linux 3
-FROM mcr.microsoft.com/azurelinux/base/core:3.0
+# Build azfilesauth RPM on RHEL 10
+FROM registry.access.redhat.com/ubi10/ubi:latest
 
-RUN tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
+RUN dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
         python3-devel libcurl-devel krb5-devel chrpath git automake \
         binutils glibc-devel kernel-headers && \
-    tdnf clean all
+    dnf clean all
 
 WORKDIR /build
 COPY . /build/

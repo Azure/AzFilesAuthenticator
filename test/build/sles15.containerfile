@@ -17,6 +17,7 @@ RUN TOPDIR=/usr/src/packages && \
         --transform 's,^\./,azfilesauth-1.0/,' -C /build . && \
     cp rpm.spec $TOPDIR/SPECS/ && \
     rpmbuild -ba $TOPDIR/SPECS/rpm.spec && \
+    rm -rf /build/PACKAGES && \
     mkdir -p /build/PACKAGES/rpm && \
     cp $TOPDIR/RPMS/*/azfilesauth*.rpm /build/PACKAGES/rpm/ && \
     rm -f /build/PACKAGES/rpm/*debuginfo* /build/PACKAGES/rpm/*debugsource* && \

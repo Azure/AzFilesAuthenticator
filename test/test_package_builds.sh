@@ -22,7 +22,7 @@ RUN_DIR="$SCRIPT_DIR/distro_run"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
 
 # All supported distros (must have matching Dockerfiles in build/ and distro_run/)
-ALL_DISTROS=(ubuntu22 ubuntu24 sles15 rhel9 azlinux3)
+ALL_DISTROS=(ubuntu22 ubuntu24 sles15 rhel9 rhel10 azlinux3)
 
 # Package type per distro
 declare -A PKG_TYPE=(
@@ -30,6 +30,7 @@ declare -A PKG_TYPE=(
     [ubuntu24]=deb
     [sles15]=rpm
     [rhel9]=rpm
+    [rhel10]=rpm
     [azlinux3]=rpm
 )
 
@@ -154,7 +155,49 @@ for distro in "${DISTROS[@]}"; do
         fail "[$distro] azfilesauthmanager --version returned empty output"
         failed=$((failed + 1))
         results+=("FAIL  $distro  version-empty")
+        continue
     fi
+
+    # --- Step 5: Run azfilesrefresh smoke test ---
+    # azfilesrefresh is a long-running daemon; run it briefly to catch import/startup errors.
+    # timeout exits 124 when the process is killed (expected), any other non-zero = real error.
+    log "[$distro] Running azfilesrefresh for 5s smoke test..."
+    refresh_log=$(mktemp)
+    refresh_rc=0
+    docker run --rm "$run_tag" \
+        timeout 5 azfilesrefresh > "$refresh_log" 2>&1 || refresh_rc=$?
+
+    if [ "$refresh_rc" -eq 124 ] || [ "$refresh_rc" -eq 0 ]; then
+        # 124 = killed by timeout (expected), 0 = exited cleanly
+        pass "[$distro] azfilesrefresh started without errors (exit=$refresh_rc)"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  azfilesrefresh-smoke")
+    else
+        tail -20 "$refresh_log"
+        fail "[$distro] azfilesrefresh failed on startup (exit=$refresh_rc)"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  azfilesrefresh-smoke")
+    fi
+    rm -f "$refresh_log"
+
+    # --- Step 6: Run unit tests inside distro container ---
+    log "[$distro] Running unit tests on distro's Python..."
+    unit_log=$(mktemp)
+    if docker run --rm \
+        -v "$REPO_ROOT/test:/tests:ro" \
+        -v "$REPO_ROOT/src:/src:ro" \
+        "$run_tag" \
+        python3 /tests/test_unit.py 2>&1 | tee "$unit_log" | tail -5; then
+        pass "[$distro] Unit tests passed on distro Python"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  unit-tests")
+    else
+        tail -20 "$unit_log"
+        fail "[$distro] Unit tests failed on distro Python"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  unit-tests")
+    fi
+    rm -f "$unit_log"
 done
 
 # --- Summary ---
