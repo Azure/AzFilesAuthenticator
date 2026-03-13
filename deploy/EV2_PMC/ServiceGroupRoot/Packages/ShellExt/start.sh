@@ -95,12 +95,14 @@ else
 '
 
     echo "Publish amd deb packages"
-    publish_package "azfilesauth_1.0-10_amd64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_amd64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
+    # TODO: focal commented out due to issue with "debconf: unable to initialize frontend: Dialog"
+    # publish_package "azfilesauth_1.0-10_amd64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_amd64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
     publish_package "azfilesauth_1.0-10_amd64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_amd64.jammy.deb -> microsoft-ubuntu-jammy-prod-apt (jammy)"
     publish_package "azfilesauth_1.0-10_amd64.noble.deb" microsoft-ubuntu-noble-prod-apt noble || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_amd64.noble.deb -> microsoft-ubuntu-noble-prod-apt (noble)"
 
     echo "Publish arm deb packages"
-    publish_package "azfilesauth_1.0-10_arm64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
+    # TODO: focal commented out due to issue with "debconf: unable to initialize frontend: Dialog"
+    # publish_package "azfilesauth_1.0-10_arm64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
     publish_package "azfilesauth_1.0-10_arm64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.jammy.deb -> microsoft-ubuntu-jammy-prod-apt (jammy)"
     publish_package "azfilesauth_1.0-10_arm64.noble.deb" microsoft-ubuntu-noble-prod-apt noble || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-10_arm64.noble.deb -> microsoft-ubuntu-noble-prod-apt (noble)"
 
