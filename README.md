@@ -32,6 +32,7 @@ The Azure Files Authentication Manager is a command-line utility and library des
     - [List Credentials](#list-credentials)
     - [Set Credentials](#set-credentials)
     - [Clear Credentials](#clear-credentials)
+    - [Version](#version)
 - [Automatic Credential Refresh (azfilesrefresh)](#automatic-credential-refresh-azfilesrefresh)
   - [Features](#features)
   - [Installation & Usage](#installation--usage)
@@ -43,6 +44,7 @@ The Azure Files Authentication Manager is a command-line utility and library des
 - [Packaging](#packaging)
   - [RPM Package](#rpm-package)
   - [.deb package](#deb-package)
+- [Building from Source](#building-from-source)
 - [License](#license)
 
 ## Installation
@@ -51,100 +53,74 @@ You can install the Azure Files Authentication Manager from Microsoft packages o
 
 ### Install from Microsoft Packages (Recommended)
 
-**Azure Linux 3.0:**
+The package location and installation steps differ depending on your Linux distro. The following distros are currently supported.
+
+> For the full end-to-end guide (storage account setup, managed identity configuration, mounting, and troubleshooting), see [Access SMB Azure file shares by using managed identities](https://learn.microsoft.com/en-us/azure/storage/files/files-managed-identities?tabs=linux).
+
+#### Azure Linux 3.0
 
 ```bash
-sudo tdnf update
-sudo tdnf install azfilesauth
+sudo tdnf update -y
+sudo tdnf install -y azfilesauth
 ```
 
-**Ubuntu 22.04 (Jammy):**
+#### Ubuntu 22.04 (Jammy)
 
 ```bash
 curl -sSL -O https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
 sudo dpkg -i packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
 sudo apt-get update
-sudo apt-get install azfilesauth
+sudo apt-get install -y azfilesauth
 ```
 
-**Ubuntu 24.04 (Noble):**
+#### Ubuntu 24.04 (Noble)
 
 ```bash
 curl -sSL -O https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
 sudo dpkg -i packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
 sudo apt-get update
-sudo apt-get install azfilesauth
+sudo apt-get install -y azfilesauth
 ```
 
-### Build from Source
+#### RHEL 9.6+ / RHEL 10.1+
 
-To build and install the library from source, follow these steps:
+```bash
+curl -sSL -O https://packages.microsoft.com/config/$(source /etc/os-release && echo "$ID/${VERSION_ID%%.*}")/packages-microsoft-prod.rpm
+sudo rpm -i packages-microsoft-prod.rpm
+rm packages-microsoft-prod.rpm
+sudo dnf update -y
+sudo dnf install -y azfilesauth
+```
 
-1. **Install Required Packages:**
+RHEL uses KCM/KEYRING as the default Kerberos credential cache. Switch to a FILE-based cache used by `azfilesauth`:
 
-    Update your package list and install the necessary packages by running the following commands:
+```bash
+sudo tee /etc/krb5.conf.d/00-azfilesauth.conf > /dev/null <<EOF
+[libdefaults]
+    default_ccache_name = FILE:/tmp/krb5cc_%{uid}
+EOF
+```
 
-    ```bash
-    sudo apt-get update
-    sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev
-    ```
+#### SLES 15 SP6
 
-    > todo: check for /etc/krb5.conf for default_realm uncommented
-    
-    > todo: check for /etc/request-key.d/cifs.spnego.conf
+```bash
+curl -sSL -O https://packages.microsoft.com/config/sles/15/packages-microsoft-prod.rpm
+sudo rpm -i packages-microsoft-prod.rpm
+rm packages-microsoft-prod.rpm
+sudo zypper refresh
+sudo zypper install -y azfilesauth
+```
 
-2. **Build and Install the Library:**
+SLES uses a persistent credential cache by default. Switch to a FILE-based cache used by `azfilesauth`:
 
-    Generate the configuration scripts, configure the build, compile the source code, and install the library using the following commands:
-
-    ```bash
-    autoconf -i
-    ./configure
-    make
-    sudo make install
-    ```
-
-3. **Configure the Tool:**
-
-    Before using the tool, you need to populate the configuration file with the `KRB5_CC_NAME` variable, which specifies the credential cache location. Edit the configuration file using:
-
-    ```bash
-    sudo vim /etc/azfilesauth/config.yaml
-    ```
-
-    Set the `KRB5_CC_NAME` variable to your desired credential cache location. For example:
-
-    ```yaml
-    KRB5_CC_NAME: /tmp/krb5cc_123
-    ```
-
-    If the `KRB5_CC_NAME` variable is not specified, the tool will default to `/tmp/krb5cc_<uid>`, where `<uid>` is the user ID of the `azfilesuser` (or the user specified in `USER_UID`).
-
-    If the configuration file does not exist, the library will create it for you. If the credential cache file already exists with a different default client principal, you will need to use a different file. Any issues will be logged in `/var/log/syslog` (or `/var/log/messages` on RHEL/CentOS/Azure Linux), and you can take appropriate action based on the logged errors.
-
-    > Todo: proper naming instructions with cruid significance
-
-    Additionally, we require that the following files are configured correctly before using the library:
-
-    1. Check if the `DEFAULT_REALM` variable is set, and uncommented, in `/etc/krb5.conf`. If not, uncomment it with your preferred editor (requires sudo).
-    2. Check if the file `/etc/request-key.d/cifs.spnego.conf` exists. If not, create it and populate it with the following:
-
-    ```bash
-    create  cifs.spnego    * * /usr/sbin/cifs.upcall %k
-    ```
-
-    Note that the location `/usr/sbin/cifs.upcall` is the standard install location for cifs.upcall. If the location is different for you, you may point to the correct path or copy the cifs.upcall binary to the required folder. If cifs.upcall is not installed, you may install `cifs-utils` with your package manager, or build it from source. The guide for building it from source is the standard automake process:
-
-    ```bash
-    git clone https://github.com/smfrench/smb3-utils
-    cd ./smb3-utils
-    autoreconf -i
-    sudo make
-    sudo make install
-    sudo cp ./cifs.upcall /usr/sbin/cifs.upcall
-    ```
+```bash
+sudo tee /etc/krb5.conf.d/00-azfilesauth.conf > /dev/null <<EOF
+[libdefaults]
+    default_ccache_name = FILE:/tmp/krb5cc_%{uid}
+EOF
+```
 
 ## Usage
 
@@ -239,12 +215,33 @@ sudo azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --imds-client-id 00000000-0000-0000-0000-000000000000
 ```
 
+**4. Using Workload Identity:**
+
+If your workload is running in a Kubernetes environment with Workload Identity Federation configured, you can authenticate using a federated token. You need to provide the Tenant ID, Client ID, and the path to the projected service account token file.
+
+```bash
+sudo azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file>
+```
+
+*Example:*
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --workload-identity --tenant-id 00000000-0000-0000-0000-000000000000 --client-id 00000000-0000-0000-0000-000000000000 --token-file /var/run/secrets/azure/tokens/azure-identity-token
+```
+
 #### Clear Credentials
 
 Clears the Kerberos credentials for the specified storage account endpoint from the cache specified by the `KRB5_CC_NAME` variable in `/etc/azfilesauth/config.yaml` (or the default cache if not specified).
 
 ```bash
 sudo azfilesauthmanager clear <file_endpoint_uri>
+```
+
+#### Version
+
+Displays the version of the Azure Files Authentication Manager library.
+
+```bash
+sudo azfilesauthmanager --version
 ```
 
 ## Automatic Credential Refresh (azfilesrefresh)
@@ -262,15 +259,12 @@ The `azfilesrefresh` daemon is a background service that automatically monitors 
 
 The `azfilesrefresh` service is installed automatically with the package.
 
-**Start the service:**
+**Start the service and enable it to start on boot (recommended):**
 ```bash
-sudo systemctl start azfilesrefresh
+sudo systemctl enable --now azfilesrefresh
 ```
 
-**Enable the service to start on boot:**
-```bash
-sudo systemctl enable azfilesrefresh
-```
+> **Important:** Without `enable`, the service will not restart after a reboot and your Kerberos tickets will expire, causing mount failures. Always use `enable --now` for production setups.
 
 **Check the status:**
 ```bash
@@ -282,9 +276,16 @@ sudo systemctl status azfilesrefresh
 sudo systemctl stop azfilesrefresh
 ```
 
+**Disable the service from starting on boot:**
+```bash
+sudo systemctl disable azfilesrefresh
+```
+
 ### Logs
 
 The refresh daemon logs its activities to `/var/log/azfilesrefresh.log`. You can check this file to troubleshoot issues or verify that tickets are being refreshed.
+
+`azfilesauthmanager` logs can be found in `/var/log/syslog` (Debian/Ubuntu) or `/var/log/messages` (RHEL/Azure Linux/SLES).
 
 ```bash
 tail -f /var/log/azfilesrefresh.log
@@ -501,6 +502,76 @@ This indicates authentication failure.
   ```
   The `.deb` package will be then packaged and be located one directory above the current directory.
   
+
+## Building from Source
+
+To build and install the library from source, follow these steps:
+
+1. **Install Required Packages:**
+
+    Update your package list and install the necessary packages by running the following commands:
+
+    **Debian/Ubuntu:**
+    ```bash
+    sudo apt-get update
+    sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev
+    ```
+
+    **RHEL/Azure Linux:**
+    ```bash
+    sudo dnf install gcc-c++ make automake autoconf libtool curl-devel krb5-devel python3
+    ```
+
+2. **Build and Install the Library:**
+
+    Generate the configuration scripts, configure the build, compile the source code, and install the library using the following commands:
+
+    ```bash
+    autoreconf -i
+    ./configure
+    make
+    sudo make install
+    ```
+
+3. **Configure the Tool:**
+
+    Before using the tool, you need to populate the configuration file with the `KRB5_CC_NAME` variable, which specifies the credential cache location. Edit the configuration file using:
+
+    ```bash
+    sudo vim /etc/azfilesauth/config.yaml
+    ```
+
+    Set the `KRB5_CC_NAME` variable to your desired credential cache location. For example:
+
+    ```yaml
+    KRB5_CC_NAME: /tmp/krb5cc_123
+    ```
+
+    If the `KRB5_CC_NAME` variable is not specified, the tool will default to `/tmp/krb5cc_<uid>`, where `<uid>` is the user ID of the `azfilesuser` (or the user specified in `USER_UID`).
+
+    If the configuration file does not exist, the library will create it for you. If the credential cache file already exists with a different default client principal, you will need to use a different file. Any issues will be logged in `/var/log/syslog` (or `/var/log/messages` on RHEL/CentOS/Azure Linux), and you can take appropriate action based on the logged errors.
+
+4. **Verify Prerequisites:**
+
+    The following files must be configured correctly before using the library:
+
+    1. Check if the `DEFAULT_REALM` variable is set and uncommented in `/etc/krb5.conf`. If not, uncomment it with your preferred editor (requires sudo).
+    2. Check if the file `/etc/request-key.d/cifs.spnego.conf` exists. If not, create it and populate it with the following:
+
+    ```bash
+    create  cifs.spnego    * * /usr/sbin/cifs.upcall %k
+    ```
+
+    Note that the location `/usr/sbin/cifs.upcall` is the standard install location for cifs.upcall. If the location is different for you, you may point to the correct path or copy the cifs.upcall binary to the required folder. If cifs.upcall is not installed, you may install `cifs-utils` with your package manager, or build it from source. The guide for building it from source is the standard automake process:
+
+    ```bash
+    git clone https://github.com/smfrench/smb3-utils
+    cd ./smb3-utils
+    autoreconf -i
+    sudo make
+    sudo make install
+    sudo cp ./cifs.upcall /usr/sbin/cifs.upcall
+    ```
 
 ## License
 
