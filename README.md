@@ -103,7 +103,9 @@ sudo tee /etc/krb5.conf.d/00-azfilesauth.conf > /dev/null <<EOF
 EOF
 ```
 
-#### SLES 15 SP6
+> **Note:** Sometimes RHEL can block kernel upcall access to the credential cache file. If a failure occurs, see `/var/log/messages` for potential causes.
+
+#### SLES 15 SP6+
 
 ```bash
 curl -sSL -O https://packages.microsoft.com/config/sles/15/packages-microsoft-prod.rpm
@@ -259,12 +261,17 @@ The `azfilesrefresh` daemon is a background service that automatically monitors 
 
 The `azfilesrefresh` service is installed automatically with the package.
 
-**Start the service and enable it to start on boot (recommended):**
+**Start the service:**
+```bash
+sudo systemctl start azfilesrefresh
+```
+
+**Start and enable the service to persist across reboots:**
 ```bash
 sudo systemctl enable --now azfilesrefresh
 ```
 
-> **Important:** Without `enable`, the service will not restart after a reboot and your Kerberos tickets will expire, causing mount failures. Always use `enable --now` for production setups.
+> **Important:** Without `enable`, the service will not restart after a reboot and your Kerberos tickets will expire, causing mount failures.
 
 **Check the status:**
 ```bash
@@ -293,14 +300,16 @@ tail -f /var/log/azfilesrefresh.log
 
 ## Library API Reference
 
-The shared library `libazfilesauth.so` is installed at `/usr/local/lib` and provides the following main functions:
+The shared library `libazfilesauth.so` is installed at `/usr/lib` (or `/usr/lib64`, `/usr/local/lib` depending on the distro) and provides the following main functions:
 
 ```c
 int extern_smb_set_credential_oauth_token(char* file_endpoint_uri, char* oauth_token, unsigned int* credential_expires_in_seconds);
 
 int extern_smb_clear_credential(char* file_endpoint_uri);
 
-void extern_smb_list_credential(void);
+int extern_smb_list_credential(bool is_json);
+
+const char* extern_smb_version();
 ```
 
 These functions are used by the command-line utility to perform the required operations.
