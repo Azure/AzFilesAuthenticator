@@ -1,0 +1,30 @@
+#!/bin/sh
+# pre-push hook: Run static analysis and unit tests before pushing.
+# Catches syntax errors, missing imports, undefined names, and behavioral regressions.
+
+echo "[pre-push] Running static analysis tests..."
+
+python3 test/test_imports.py 2>&1
+rc=$?
+
+if [ $rc -ne 0 ]; then
+    echo ""
+    echo "[pre-push] PUSH BLOCKED: Static analysis tests failed."
+    echo "[pre-push] Fix the issues above and try again."
+    exit 1
+fi
+
+echo "[pre-push] Running unit tests..."
+
+python3 test/test_unit.py 2>&1
+rc=$?
+
+if [ $rc -ne 0 ]; then
+    echo ""
+    echo "[pre-push] PUSH BLOCKED: Unit tests failed."
+    echo "[pre-push] Fix the issues above and try again."
+    exit 1
+fi
+
+echo "[pre-push] All checks passed."
+exit 0

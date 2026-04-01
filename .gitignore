@@ -1,4 +1,5 @@
 test/test_config.yaml
+test/artifacts/
 
 # Ignore compiled binary files
 *.o

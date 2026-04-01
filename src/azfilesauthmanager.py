@@ -78,10 +78,14 @@ def init_new_user():
         if rc != 0:
             print("Failed to create new user")
             sys.exit(1)
-        # Add the user to the sudo group
-        rc = os.system(f"sudo usermod -aG sudo {new_user} > /dev/null 2>&1")
+        # Add the user to the sudo/wheel group (SLES/RHEL use 'wheel', Debian/Ubuntu use 'sudo')
+        rc = os.system(f"usermod -aG sudo {new_user} > /dev/null 2>&1")
         if rc != 0:
-            print("Failed to add user to sudo group")
+            # 'sudo' group not found; try 'wheel' (SLES/RHEL), creating it if needed
+            os.system("groupadd -f wheel > /dev/null 2>&1")
+            rc = os.system(f"usermod -aG wheel {new_user} > /dev/null 2>&1")
+        if rc != 0:
+            print("Failed to add user to sudo/wheel group")
             sys.exit(1)
 
         new_user_uid = subprocess.check_output(f"id -u {new_user}", shell=True).decode().strip()
@@ -221,6 +225,11 @@ def run_azfilesauthmanager():
 
     command = sys.argv[1]
 
+    if command == "--version":
+        v = lib.extern_smb_version()
+        print(v.decode() if isinstance(v, (bytes, bytearray)) else v)
+        sys.exit(0)
+
     user_id = int(init_new_user())
 
     if command == "list":
@@ -324,10 +333,6 @@ def run_azfilesauthmanager():
         # TODO - Check formats?
 
         azfiles_clear(file_endpoint_uri)
-
-    elif command == "--version":
-        v = lib.extern_smb_version()
-        print(v.decode() if isinstance(v, (bytes, bytearray)) else v)
 
     else:
         print(USAGE_MESSAGE)
