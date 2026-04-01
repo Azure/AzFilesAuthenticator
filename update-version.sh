@@ -43,9 +43,18 @@ if [[ -f package-azlinux.sh ]]; then
 fi
 if [[ -f deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh ]]; then
     sed -i -E "s/[0-9]+\.[0-9]+-[0-9]+/${DEB_VERSION}/g"  deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
-    tail -n 5 deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
+    grep 'publish_package' deploy/EV2_PMC/ServiceGroupRoot/Packages/ShellExt/start.sh
 
     echo "Updated start.sh → ${DEB_VERSION}"
+fi
+
+# --- Reset EV2 version.txt to new x.y.z.0 (pre-commit hook will bump to .1) ---
+VERSION_FILE="deploy/EV2_PMC/ServiceGroupRoot/version.txt"
+if [[ -f "$VERSION_FILE" ]]; then
+    OLD_EV2_VERSION=$(cat "$VERSION_FILE")
+    NEW_EV2_VERSION="${NEW_VERSION}.${NEW_RELEASE}.0"
+    echo "$NEW_EV2_VERSION" > "$VERSION_FILE"
+    echo "Updated $VERSION_FILE → ${NEW_EV2_VERSION} (was ${OLD_EV2_VERSION})"
 fi
 
 echo "✅ All files updated successfully."

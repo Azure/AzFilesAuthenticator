@@ -1045,6 +1045,11 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     }
 
     out:
+    if (is_json && json_output.tellp() == 0) {
+        // No JSON was written (early error or no cifs creds) – emit empty array
+        // so callers always receive valid JSON on stdout.
+        std::cout << "[]" << std::endl;
+    }
     if (context) {
         krb5_free_context(context);
     }

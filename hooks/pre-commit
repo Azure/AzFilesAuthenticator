@@ -1,0 +1,17 @@
+#!/bin/sh
+# Auto-increment the build number (last component) in version.txt on each commit.
+# version.txt format: x.y.z.d  where d is the build number.
+
+VERSION_FILE="deploy/EV2_PMC/ServiceGroupRoot/version.txt"
+
+if [ ! -f "$VERSION_FILE" ]; then
+    exit 0
+fi
+
+OLD_VERSION=$(cat "$VERSION_FILE")
+PREFIX="${OLD_VERSION%.*}"
+BUILD_NUM="${OLD_VERSION##*.}"
+NEW_BUILD_NUM=$((BUILD_NUM + 1))
+
+echo "${PREFIX}.${NEW_BUILD_NUM}" > "$VERSION_FILE"
+git add "$VERSION_FILE"
