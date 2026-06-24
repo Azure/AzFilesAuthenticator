@@ -102,7 +102,91 @@ def init_new_user():
     return new_user_uid
 
 
+def is_arc_environment():
+    # Azure Arc-enabled servers expose the Hybrid Instance Metadata Service
+    # (HIMDS) endpoint via the IDENTITY_ENDPOINT environment variable, e.g.
+    # http://127.0.0.1:40342/metadata/identity/oauth2/token.
+    return bool(os.environ.get("IDENTITY_ENDPOINT"))
+
+
+def get_arc_oauth_token():
+    # Azure Arc HIMDS uses a challenge-response flow:
+    #   1) GET the token endpoint; the first response is HTTP 401 with a
+    #      WWW-Authenticate header pointing to a short-lived challenge file
+    #      (e.g. "Basic realm=/var/opt/azcmagent/tokens/<guid>.key").
+    #   2) Read the challenge file (root-owned, group readable by himds) and
+    #      replay the GET with "Authorization: Basic <file-contents>".
+    # Arc only supports system-assigned managed identity, so no client_id is
+    # accepted here.
+    endpoint = os.environ.get("IDENTITY_ENDPOINT")
+    if not endpoint:
+        print("IDENTITY_ENDPOINT is not set; cannot use Azure Arc managed identity")
+        return None
+
+    params = {
+        "api-version": "2020-06-01",
+        "resource": "https://storage.azure.com",
+    }
+    headers = {"Metadata": "true"}
+
+    try:
+        challenge_resp = requests.get(endpoint, headers=headers, params=params, timeout=10)
+    except Exception as e:
+        print(f"Error contacting Azure Arc HIMDS endpoint {endpoint}: {e}")
+        return None
+
+    if challenge_resp.status_code != 401:
+        print(f"Unexpected response from Azure Arc HIMDS (expected 401, got {challenge_resp.status_code}): {challenge_resp.text}")
+        return None
+
+    www_auth = challenge_resp.headers.get("WWW-Authenticate", "")
+    # Expected format: 'Basic realm=<path-to-challenge-file>'
+    marker = "realm="
+    if marker not in www_auth:
+        print(f"Azure Arc HIMDS did not return a challenge file path (WWW-Authenticate: {www_auth!r})")
+        return None
+    challenge_path = www_auth.split(marker, 1)[1].strip().strip('"')
+
+    # Guard against path traversal: only accept paths under /var/opt/azcmagent/tokens.
+    expected_dir = "/var/opt/azcmagent/tokens/"
+    if not os.path.realpath(challenge_path).startswith(expected_dir):
+        print(f"Refusing to read Arc challenge file outside {expected_dir}: {challenge_path}")
+        return None
+
+    try:
+        with open(challenge_path, "r") as f:
+            secret = f.read().strip()
+    except Exception as e:
+        print(f"Error reading Azure Arc challenge file {challenge_path}: {e}")
+        return None
+
+    auth_headers = dict(headers)
+    auth_headers["Authorization"] = f"Basic {secret}"
+
+    try:
+        response = requests.get(endpoint, headers=auth_headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        tok = data.get("access_token")
+        if not tok:
+            print("Access token missing in Azure Arc HIMDS response")
+            return None
+        return tok
+    except Exception as e:
+        print(f"Error fetching Azure Arc system-assigned managed identity token: {e}")
+        return None
+
+
 def get_oauth_token(client_id=None):
+    # On Azure Arc-enabled servers, transparently route to HIMDS. Arc only
+    # supports system-assigned managed identity, so user-assigned (client_id)
+    # is rejected with a clear error.
+    if is_arc_environment():
+        if client_id:
+            print("Azure Arc-enabled servers only support system-assigned managed identity; --imds-client-id is not supported on Arc.")
+            return None
+        return get_arc_oauth_token()
+
     # IMDS: system-assigned (no client_id) or user-assigned (with client_id)
     base = "http://169.254.169.254/metadata/identity/oauth2/token"
     params = ["api-version=2018-02-01", "resource=https://storage.azure.com"]
