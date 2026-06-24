@@ -14,7 +14,7 @@ CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
     azfilesauthmanager set <file_endpoint_uri> <oauth_token>
-    azfilesauthmanager set <file_endpoint_uri> --system
+    azfilesauthmanager set <file_endpoint_uri> --system [--identity-endpoint <endpoint>]
     azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
     azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file>
     azfilesauthmanager clear <file_endpoint_uri>
@@ -102,14 +102,15 @@ def init_new_user():
     return new_user_uid
 
 
-def is_arc_environment():
+def is_arc_environment(identity_endpoint=None):
     # Azure Arc-enabled servers expose the Hybrid Instance Metadata Service
-    # (HIMDS) endpoint via the IDENTITY_ENDPOINT environment variable, e.g.
+    # (HIMDS) endpoint via the --identity-endpoint parameter or the
+    # IDENTITY_ENDPOINT environment variable, e.g.
     # http://127.0.0.1:40342/metadata/identity/oauth2/token.
-    return bool(os.environ.get("IDENTITY_ENDPOINT"))
+    return bool(identity_endpoint or os.environ.get("IDENTITY_ENDPOINT"))
 
 
-def get_arc_oauth_token():
+def get_arc_oauth_token(identity_endpoint=None):
     # Azure Arc HIMDS uses a challenge-response flow:
     #   1) GET the token endpoint; the first response is HTTP 401 with a
     #      WWW-Authenticate header pointing to a short-lived challenge file
@@ -118,7 +119,7 @@ def get_arc_oauth_token():
     #      replay the GET with "Authorization: Basic <file-contents>".
     # Arc only supports system-assigned managed identity, so no client_id is
     # accepted here.
-    endpoint = os.environ.get("IDENTITY_ENDPOINT")
+    endpoint = identity_endpoint or os.environ.get("IDENTITY_ENDPOINT")
     if not endpoint:
         print("IDENTITY_ENDPOINT is not set; cannot use Azure Arc managed identity")
         return None
@@ -177,15 +178,15 @@ def get_arc_oauth_token():
         return None
 
 
-def get_oauth_token(client_id=None):
+def get_oauth_token(client_id=None, identity_endpoint=None):
     # On Azure Arc-enabled servers, transparently route to HIMDS. Arc only
     # supports system-assigned managed identity, so user-assigned (client_id)
     # is rejected with a clear error.
-    if is_arc_environment():
+    if is_arc_environment(identity_endpoint):
         if client_id:
             print("Azure Arc-enabled servers only support system-assigned managed identity; --imds-client-id is not supported on Arc.")
             return None
-        return get_arc_oauth_token()
+        return get_arc_oauth_token(identity_endpoint)
 
     # IMDS: system-assigned (no client_id) or user-assigned (with client_id)
     base = "http://169.254.169.254/metadata/identity/oauth2/token"
@@ -368,10 +369,14 @@ def run_azfilesauthmanager():
                 sys.exit(1)
         # System-assigned MI path
         elif is_system_mi:
-            if len(argv) != 4:  # set <endpoint> --system
-                print(USAGE_MESSAGE)
-                sys.exit(1)
-            oauth_token = get_oauth_token()
+            identity_endpoint = None
+            if "--identity-endpoint" in argv:
+                try:
+                    identity_endpoint = argv[argv.index("--identity-endpoint") + 1]
+                except IndexError:
+                    print(USAGE_MESSAGE)
+                    sys.exit(1)
+            oauth_token = get_oauth_token(identity_endpoint=identity_endpoint)
             if oauth_token is None:
                 sys.exit(1)
         # Workload Identity path
