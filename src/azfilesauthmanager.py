@@ -16,7 +16,7 @@ USAGE_MESSAGE = """Usage:
     azfilesauthmanager set <file_endpoint_uri> <oauth_token>
     azfilesauthmanager set <file_endpoint_uri> --system
     azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
-    azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file>
+    azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file> [--authority-host <authority_host>] [--resource <resource>]
     azfilesauthmanager clear <file_endpoint_uri>
     azfilesauthmanager --version
 """
@@ -127,7 +127,7 @@ def get_oauth_token(client_id=None):
             print(f"Error fetching system-assigned managed identity token: {e}")
         return None
 
-def get_workload_identity_token(tenant_id, client_id, token_file):
+def get_workload_identity_token(tenant_id, client_id, token_file, authority_host=None, resource=None):
     if not all([tenant_id, client_id, token_file]):
         print("Error: Missing parameters for Workload Identity.")
         return None
@@ -139,11 +139,16 @@ def get_workload_identity_token(tenant_id, client_id, token_file):
         print(f"Error reading federated token file: {e}")
         return None
 
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    # Default to public Azure AD / storage resource.
+    # Sovereign clouds (e.g. Mooncake, US Gov) pass a cloud-specific authority host.
+    authority = (authority_host or "https://login.microsoftonline.com").rstrip("/")
+    storage_resource = (resource or "https://storage.azure.com").rstrip("/")
+
+    url = f"{authority}/{tenant_id}/oauth2/v2.0/token"
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     data = {
         "client_id": client_id,
-        "scope": "https://storage.azure.com/.default",
+        "scope": f"{storage_resource}/.default",
         "grant_type": "client_credentials",
         "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
         "client_assertion": client_assertion
@@ -295,6 +300,8 @@ def run_azfilesauthmanager():
             tenant_id = None
             client_id = None
             token_file = None
+            authority_host = None
+            resource = None
 
             try:
                 if "--tenant-id" in argv:
@@ -303,6 +310,10 @@ def run_azfilesauthmanager():
                     client_id = argv[argv.index("--client-id") + 1]
                 if "--token-file" in argv:
                     token_file = argv[argv.index("--token-file") + 1]
+                if "--authority-host" in argv:
+                    authority_host = argv[argv.index("--authority-host") + 1]
+                if "--resource" in argv:
+                    resource = argv[argv.index("--resource") + 1]
             except IndexError:
                 print(USAGE_MESSAGE)
                 sys.exit(1)
@@ -312,7 +323,13 @@ def run_azfilesauthmanager():
                 print(USAGE_MESSAGE)
                 sys.exit(1)
 
-            oauth_token = get_workload_identity_token(tenant_id, client_id, token_file)
+            oauth_token = get_workload_identity_token(
+                tenant_id,
+                client_id,
+                token_file,
+                authority_host=authority_host,
+                resource=resource,
+            )
             if oauth_token is None:
                 sys.exit(1)
         else:

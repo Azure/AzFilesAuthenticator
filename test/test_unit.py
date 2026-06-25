@@ -261,6 +261,45 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         self.assertEqual(call_data["client_id"], "client-1")
         self.assertEqual(call_data["client_assertion"], "jwt-assertion-data")
 
+    @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
+    @mock.patch("requests.post")
+    def test_default_authority_is_public(self, mock_post):
+        mock_post.return_value = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "wi-token-123"},
+        )
+        mock_post.return_value.raise_for_status = mock.MagicMock()
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.post = mock_post
+
+        self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
+        call_url = mock_post.call_args[0][0]
+        self.assertEqual(call_url, "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token")
+        call_data = mock_post.call_args[1]["data"]
+        self.assertEqual(call_data["scope"], "https://storage.azure.com/.default")
+
+    @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
+    @mock.patch("requests.post")
+    def test_sovereign_authority_and_resource_override(self, mock_post):
+        mock_post.return_value = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "wi-token-123"},
+        )
+        mock_post.return_value.raise_for_status = mock.MagicMock()
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.post = mock_post
+
+        # Mooncake (Azure China) authority host; trailing slash must be normalized.
+        self.mod.get_workload_identity_token(
+            "tenant-1", "client-1", "/tok",
+            authority_host="https://login.chinacloudapi.cn/",
+            resource="https://storage.sovereign.example/",
+        )
+        call_url = mock_post.call_args[0][0]
+        self.assertEqual(call_url, "https://login.chinacloudapi.cn/tenant-1/oauth2/v2.0/token")
+        call_data = mock_post.call_args[1]["data"]
+        self.assertEqual(call_data["scope"], "https://storage.sovereign.example/.default")
+
 
 # ===================================================================
 # Test: azfilesauthmanager.py — native lib wrappers
