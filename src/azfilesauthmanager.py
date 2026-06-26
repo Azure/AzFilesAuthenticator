@@ -102,6 +102,26 @@ def init_new_user():
     return new_user_uid
 
 
+def _is_loopback_endpoint(endpoint):
+    """Validate that the endpoint URL resolves to a loopback address."""
+    try:
+        from urllib.parse import urlparse
+        import socket
+        parsed = urlparse(endpoint)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Resolve hostname and check if all addresses are loopback
+        addrs = socket.getaddrinfo(hostname, None)
+        for addr_info in addrs:
+            ip = addr_info[4][0]
+            if not (ip.startswith("127.") or ip == "::1"):
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def is_arc_environment(identity_endpoint=None):
     # Azure Arc-enabled servers expose the Hybrid Instance Metadata Service
     # (HIMDS) endpoint via the --identity-endpoint parameter or the
@@ -122,6 +142,12 @@ def get_arc_oauth_token(identity_endpoint=None):
     endpoint = identity_endpoint or os.environ.get("IDENTITY_ENDPOINT")
     if not endpoint:
         print("IDENTITY_ENDPOINT is not set; cannot use Azure Arc managed identity")
+        return None
+
+    # Security: Arc HIMDS should only be on loopback. Reject non-local endpoints
+    # to prevent accidentally sending challenge secrets to remote addresses.
+    if not _is_loopback_endpoint(endpoint):
+        print(f"Refusing to use non-loopback identity endpoint: {endpoint}")
         return None
 
     params = {
@@ -146,7 +172,11 @@ def get_arc_oauth_token(identity_endpoint=None):
     if marker not in www_auth:
         print(f"Azure Arc HIMDS did not return a challenge file path (WWW-Authenticate: {www_auth!r})")
         return None
-    challenge_path = www_auth.split(marker, 1)[1].strip().strip('"')
+    realm_value = www_auth.split(marker, 1)[1].strip().strip('"')
+    # Strip trailing parameters (e.g. ', charset="UTF-8"') after the realm value
+    if ',' in realm_value:
+        realm_value = realm_value.split(',', 1)[0].strip().strip('"')
+    challenge_path = realm_value
 
     # Guard against path traversal: only accept paths under /var/opt/azcmagent/tokens.
     expected_dir = "/var/opt/azcmagent/tokens/"
@@ -370,10 +400,19 @@ def run_azfilesauthmanager():
         # System-assigned MI path
         elif is_system_mi:
             identity_endpoint = None
-            if "--identity-endpoint" in argv:
-                try:
-                    identity_endpoint = argv[argv.index("--identity-endpoint") + 1]
-                except IndexError:
+            # Parse known optional flags; reject unknown arguments
+            remaining = argv[3:]  # args after 'set <endpoint> --system'
+            i = 0
+            while i < len(remaining):
+                if remaining[i] == "--identity-endpoint":
+                    if i + 1 >= len(remaining) or remaining[i + 1].startswith("--"):
+                        print("Error: --identity-endpoint requires a value")
+                        print(USAGE_MESSAGE)
+                        sys.exit(1)
+                    identity_endpoint = remaining[i + 1]
+                    i += 2
+                else:
+                    print(f"Error: unknown argument '{remaining[i]}'")
                     print(USAGE_MESSAGE)
                     sys.exit(1)
             oauth_token = get_oauth_token(identity_endpoint=identity_endpoint)
