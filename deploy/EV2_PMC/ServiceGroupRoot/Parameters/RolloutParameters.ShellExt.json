@@ -3,6 +3,38 @@
   "contentVersion": "1.0.0.0",
   "shellExtensions": [
     {
+      "name": "PMCTest",
+      "type": "mariner2",
+      "properties": {
+        "maxExecutionTime": "PT30M",
+        "useFallBackLocations": true,
+        "skipDeleteAfterExecution": false
+      },
+      "package": {
+        "reference": {
+          "path": "Packages/ShellExt/pmc_packages.tar"
+        }
+      },
+      "launch": {
+        "command": ["/bin/sh", "-c", "chmod +x start.sh && ./start.sh test"],
+        "environmentVariables": [
+          { "name": "PMC_REPO_NAME", "value": "__PMC_REPO_NAME__" },
+          { "name": "PMC_REPO_DIST", "value": "__PMC_REPO_DIST__" }
+        ],
+        "subnetIds": [
+            {
+                "id": "/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/__PMC_MSI_RG__/providers/Microsoft.Network/virtualNetworks/azfilesauthVnet/subnets/azfilesauthSubnet3"
+            }
+        ],
+        "identity": {
+          "type": "UserAssigned",
+          "userAssignedIdentities": [
+            "/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/__PMC_MSI_RG__/providers/Microsoft.ManagedIdentity/userAssignedIdentities/__PMC_MSI_NAME__"
+          ]
+        }
+      }
+    },
+    {
       "name": "PMCPublish",
       "type": "mariner2",
       "properties": {

@@ -546,11 +546,6 @@ extends:
                   artifact: 'drop_SignArtifacts_SignArtifacts'
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
-              - task: UsePythonVersion@0
-                displayName: 'Use Python >= 3.9'
-                inputs:
-                  versionSpec: ">=3.9 <3.10"
-
               - task: PipAuthenticate@1
                 displayName: 'Pip Authenticate'
                 inputs:

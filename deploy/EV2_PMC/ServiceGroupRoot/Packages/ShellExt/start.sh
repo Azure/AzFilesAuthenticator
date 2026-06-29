@@ -37,6 +37,55 @@ PMC="pmc"
 # $PMC repo list --path-contains "rhel"
 # $PMC repo list --path-contains "sles"
 
+check_repo() {
+    if ! $PMC repo list --name "$1" | grep -q "$1"; then
+        echo "ERROR: repo not found: $1"; exit 1
+    fi
+    echo "  ok: $1"
+}
+
+check_package() {
+    if [ ! -e "packages/$1" ]; then
+        echo "ERROR: package not found: packages/$1"; exit 1
+    fi
+    echo "  ok: $1"
+}
+
+if [ "$1" = "test" ]; then
+    echo "3) Preflight validation (no publish)"
+
+    echo "3a) Verify pmc-cli is installed and reachable"
+    command -v pmc || { echo "ERROR: pmc not on PATH"; exit 1; }
+    pmc --version || { echo "ERROR: pmc-cli not runnable"; exit 1; }
+
+    echo "3b) Verify package artifacts are present"
+    ls -l packages/ || { echo "ERROR: packages/ missing"; exit 1; }
+    check_package azfilesauth_1.0-11_amd64.jammy.deb
+    check_package azfilesauth_1.0-11_amd64.noble.deb
+    check_package azfilesauth_1.0-11_arm64.jammy.deb
+    check_package azfilesauth_1.0-11_arm64.noble.deb
+    check_package azfilesauth-1.0-11.azl3.x86_64.rpm
+    check_package azfilesauth-1.0-11.azl3.aarch64.rpm
+    check_package azfilesauth-1.0-11.el9.x86_64.rpm
+    check_package azfilesauth-1.0-11.el9.aarch64.rpm
+    check_package azfilesauth-1.0-11.el10.x86_64.rpm
+    check_package azfilesauth-1.0-11.el10.aarch64.rpm
+    check_package azfilesauth-1.0-11.x86_64.rpm
+    check_package azfilesauth-1.0-11.aarch64.rpm
+
+    echo "3c) Verify target repos exist"
+    check_repo microsoft-ubuntu-jammy-prod-apt
+    check_repo microsoft-ubuntu-noble-prod-apt
+    check_repo azurelinux-3.0-prod-ms-oss-x86_64-yum
+    check_repo azurelinux-3.0-prod-ms-oss-aarch64-yum
+    check_repo microsoft-rhel9.0-prod-yum
+    check_repo microsoft-rhel10-prod-yum
+    check_repo microsoft-sles15-prod-yum
+
+    echo "Preflight validation passed"
+    exit 0
+fi
+
 publish_package() {
     local pattern="$1"
     local repo_name="$2"
