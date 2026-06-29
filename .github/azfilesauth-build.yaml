@@ -61,6 +61,9 @@ extends:
                 imageName: 'azfilesauth-1es-ubuntu24-arm'
                 releaseName: 'noble'
       
+          variables:
+            ob_artifactSuffix: $(imageName)
+
           pool:
               type: linux
               isCustom: true
@@ -96,7 +99,7 @@ extends:
             - task: PublishPipelineArtifact@1
               inputs:
                 targetPath: '$(Build.ArtifactStagingDirectory)'
-                artifact: 'drop_BuildPackages_BuildDEB_$(imageName)'
+                artifact: 'drop_BuildPackages_BuildDEB'
 
 
         - job: BuildRPM
@@ -129,6 +132,9 @@ extends:
               Rhel10_arm:
                 poolHosted: 'azfilesauth-1es-arm-pool'
                 imageName: 'azfilesauth-1es-rhel10-arm'
+
+          variables:
+            ob_artifactSuffix: $(imageName)
 
           pool:
               type: linux
@@ -203,7 +209,7 @@ extends:
             - task: PublishPipelineArtifact@1
               inputs:
                 targetPath: '$(Build.ArtifactStagingDirectory)'
-                artifact: 'drop_BuildPackages_BuildRPM_$(imageName)'
+                artifact: 'drop_BuildPackages_BuildRPM'
 
 
 
