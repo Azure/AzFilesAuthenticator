@@ -96,7 +96,7 @@ extends:
             - task: PublishPipelineArtifact@1
               inputs:
                 targetPath: '$(Build.ArtifactStagingDirectory)'
-                artifact: 'azfilesauth-deb-$(imageName)'
+                artifact: 'drop_BuildPackages_BuildDEB'
 
 
         - job: BuildRPM
@@ -203,7 +203,7 @@ extends:
             - task: PublishPipelineArtifact@1
               inputs:
                 targetPath: '$(Build.ArtifactStagingDirectory)'
-                artifact: 'azfilesauth-rpm-$(imageName)'
+                artifact: 'drop_BuildPackages_BuildRPM'
 
 
 
@@ -243,14 +243,14 @@ extends:
                 displayName: 'Download DEB Artifacts'
                 inputs:
                   source: 'current'
-                  patterns: 'azfilesauth-deb-*/**'
+                  patterns: 'drop_BuildPackages_BuildDEB*/**'
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-deb
 
               - task: DownloadPipelineArtifact@2
                 displayName: 'Download RPM Artifacts'
                 inputs:
                   source: 'current'
-                  patterns: 'azfilesauth-rpm-*/**'
+                  patterns: 'drop_BuildPackages_BuildRPM*/**'
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-rpm
 
               - script: |
@@ -510,7 +510,7 @@ extends:
                 displayName: 'Publish Signed Artifacts'
                 inputs:
                   targetPath: '$(Build.ArtifactStagingDirectory)/signed'
-                  artifact: 'azfilesauth-signed'
+                  artifact: 'drop_SignArtifacts_SignArtifacts'
 
       - stage: PublishEv2Artifacts
         displayName: 'Publish EV2 Artifacts'
@@ -537,7 +537,7 @@ extends:
                 displayName: 'Download Signed Artifacts'
                 inputs:
                   source: 'current'
-                  artifact: 'azfilesauth-signed'
+                  artifact: 'drop_SignArtifacts_SignArtifacts'
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
               - task: UsePythonVersion@0
@@ -605,7 +605,7 @@ extends:
                 displayName: 'Publish EV2_PMC Artifacts'
                 inputs:
                   targetPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
-                  artifact: 'EV2_PMC'
+                  artifact: 'drop_PublishEv2Artifacts_BuildEV2Artifacts'
 
           # - job: Ev2Rollout
           #   displayName: 'EV2 Rollout'
