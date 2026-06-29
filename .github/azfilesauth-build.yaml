@@ -93,10 +93,10 @@ extends:
                 cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)/
               displayName: 'Stage DEB Package'
 
-            - task: PublishBuildArtifacts@1
+            - task: PublishPipelineArtifact@1
               inputs:
-                PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-                ArtifactName: 'azfilesauth-deb'
+                targetPath: '$(Build.ArtifactStagingDirectory)'
+                artifact: 'azfilesauth-deb-$(imageName)'
 
 
         - job: BuildRPM
@@ -200,10 +200,10 @@ extends:
                 ls -R $(Build.ArtifactStagingDirectory)
               displayName: 'Copy RPM Package to Artifacts'
 
-            - task: PublishBuildArtifacts@1
+            - task: PublishPipelineArtifact@1
               inputs:
-                PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-                ArtifactName: 'azfilesauth-rpm'
+                targetPath: '$(Build.ArtifactStagingDirectory)'
+                artifact: 'azfilesauth-rpm-$(imageName)'
 
 
 
@@ -239,17 +239,30 @@ extends:
                 displayName: 'NSLookup keyvault'
 
               # download artifacts that need to be published
-              - task: DownloadBuildArtifacts@1
+              - task: DownloadPipelineArtifact@2
                 displayName: 'Download DEB Artifacts'
                 inputs:
-                  ArtifactName: 'azfilesauth-deb'
-                  downloadPath: $(Build.ArtifactStagingDirectory)
+                  source: 'current'
+                  patterns: 'azfilesauth-deb-*/**'
+                  path: $(Build.ArtifactStagingDirectory)/azfilesauth-deb
 
-              - task: DownloadBuildArtifacts@1
+              - task: DownloadPipelineArtifact@2
                 displayName: 'Download RPM Artifacts'
                 inputs:
-                  ArtifactName: 'azfilesauth-rpm'
-                  downloadPath: $(Build.ArtifactStagingDirectory)
+                  source: 'current'
+                  patterns: 'azfilesauth-rpm-*/**'
+                  path: $(Build.ArtifactStagingDirectory)/azfilesauth-rpm
+
+              - script: |
+                  set -x
+                  # Flatten per-matrix-leg artifact subfolders into one dir each
+                  DEB_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-deb"
+                  find "$DEB_DIR" -mindepth 2 -name '*.deb' -exec mv -t "$DEB_DIR" {} +
+                  find "$DEB_DIR" -mindepth 1 -type d -empty -delete
+                  RPM_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-rpm"
+                  find "$RPM_DIR" -mindepth 2 -name '*.rpm' -exec mv -t "$RPM_DIR" {} +
+                  find "$RPM_DIR" -mindepth 1 -type d -empty -delete
+                displayName: 'Flatten downloaded artifacts'
 
               - script: |
                   set -x
@@ -493,11 +506,11 @@ extends:
                   ls -R $(Build.ArtifactStagingDirectory)/signed/
                 displayName: 'List Signed Artifacts'
 
-              - task: PublishBuildArtifacts@1
+              - task: PublishPipelineArtifact@1
                 displayName: 'Publish Signed Artifacts'
                 inputs:
-                  PathtoPublish: '$(Build.ArtifactStagingDirectory)/signed'
-                  ArtifactName: 'azfilesauth-signed'
+                  targetPath: '$(Build.ArtifactStagingDirectory)/signed'
+                  artifact: 'azfilesauth-signed'
 
       - stage: PublishEv2Artifacts
         displayName: 'Publish EV2 Artifacts'
@@ -520,11 +533,12 @@ extends:
                 displayName: 'Checkout Repository'
 
               # download artifacts that need to be published
-              - task: DownloadBuildArtifacts@1
+              - task: DownloadPipelineArtifact@2
                 displayName: 'Download Signed Artifacts'
                 inputs:
-                  ArtifactName: 'azfilesauth-signed'
-                  downloadPath: $(Build.ArtifactStagingDirectory)
+                  source: 'current'
+                  artifact: 'azfilesauth-signed'
+                  path: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
               - task: UsePythonVersion@0
                 displayName: 'Use Python >= 3.9'
@@ -587,11 +601,11 @@ extends:
                 inputs:
                   BuildDropPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
 
-              - task: PublishBuildArtifacts@1
+              - task: PublishPipelineArtifact@1
                 displayName: 'Publish EV2_PMC Artifacts'
                 inputs:
-                  PathtoPublish: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
-                  ArtifactName: 'EV2_PMC'
+                  targetPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
+                  artifact: 'EV2_PMC'
 
           # - job: Ev2Rollout
           #   displayName: 'EV2 Rollout'
