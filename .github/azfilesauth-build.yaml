@@ -99,7 +99,7 @@ extends:
             - task: PublishPipelineArtifact@1
               inputs:
                 targetPath: '$(Build.ArtifactStagingDirectory)'
-                artifact: 'drop_BuildPackages_BuildDEB'
+                artifact: 'drop_BuildPackages_BuildDEB$(imageName)'
 
 
         - job: BuildRPM
@@ -209,7 +209,7 @@ extends:
             - task: PublishPipelineArtifact@1
               inputs:
                 targetPath: '$(Build.ArtifactStagingDirectory)'
-                artifact: 'drop_BuildPackages_BuildRPM'
+                artifact: 'drop_BuildPackages_BuildRPM$(imageName)'
 
 
 
