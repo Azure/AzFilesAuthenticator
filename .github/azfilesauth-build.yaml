@@ -535,7 +535,6 @@ extends:
 
             steps:
               - checkout: self
-                path: AzFilesAuthenticator
                 displayName: 'Checkout Repository'
 
               # download artifacts that need to be published
