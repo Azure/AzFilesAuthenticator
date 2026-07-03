@@ -4,7 +4,7 @@
   "shellExtensions": [
     {
       "name": "PMCTest",
-      "type": "mariner2",
+      "type": "azl3",
       "properties": {
         "maxExecutionTime": "PT30M",
         "useFallBackLocations": true,
@@ -36,7 +36,7 @@
     },
     {
       "name": "PMCPublish",
-      "type": "mariner2",
+      "type": "azl3",
       "properties": {
         "maxExecutionTime": "PT50M",
         "useFallBackLocations": true,
@@ -68,7 +68,7 @@
     },
     {
       "name": "PMCRollback",
-      "type": "mariner2",
+      "type": "azl3",
       "properties": {
         "maxExecutionTime": "PT50M",
         "useFallBackLocations": true,

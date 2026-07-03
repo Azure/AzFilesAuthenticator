@@ -23,10 +23,10 @@
                   "rolloutParametersPath": "Parameters/RolloutParameters.ShellExt.json",
                   "shell": [
                       {
-                          "type": "mariner2",
+                          "type": "azl3",
                           "properties": {
-                              "imageName": "adm-mariner-20-l",
-                              "imageVersion": "v14"
+                              "imageName": "adm-azurelinux-30-l",
+                              "imageVersion": "v2"
                           }
                       }
                   ]
