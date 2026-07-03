@@ -528,10 +528,10 @@ extends:
 
             pool:
               type: linux
-              isCustom: true
-              name: 'azfilesauth-prod-1es-pool'
-              demands:
-                - ImageOverride -equals azfilesauth-prod-1es-ubuntu22-image
+
+            variables:
+              ob_outputDirectory: '$(Build.SourcesDirectory)/out'
+              LinuxContainerImage: 'mcr.microsoft.com/onebranch/azurelinux/build:3.0'
 
             steps:
               - checkout: self
@@ -576,29 +576,22 @@ extends:
                   SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
                   cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
                   cp $(serviceModel.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ServiceModel.Prod.json"
-              
+
                   echo "1) Get pmc-cli"
                   cd "$SHEXT_BUNDLE_DIR"
-                  # Ensure pip exists in the custom build image. UsePythonVersion@0 cannot run here:
-                  # its prebuilt Python fails with 'libpython3.x.so.1.0: cannot open shared object file'.
+                  # This job runs inside AzureLinux 3.0 (LinuxContainerImage) — the same OS/Python (3.12)
+                  # as the shell-ext ACI runtime — so native pip vendors wheels with the correct ABI.
                   if ! python3 -m pip --version >/dev/null 2>&1; then
-                    sudo apt-get update
-                    sudo apt-get install -y python3-pip
+                    tdnf install -y python3-pip
                   fi
                   python3 -m pip --version
                   rm -rf python_dl && mkdir python_dl
-                  # Vendor pmc-cli + deps for the AzureLinux 3.0 shell-ext runtime (Python 3.12),
-                  # independent of this build agent's Python version.
-                  python3 -m pip download -d python_dl pmc-cli \
-                    --only-binary=:all: --implementation cp --python-version 3.12 \
-                    --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
-                    --platform manylinux_2_28_x86_64 --platform manylinux_2_34_x86_64
-                  # Fail loudly if no wheels were vendored (prevents shipping an empty python_dl)
+                  python3 -m pip download -d python_dl pmc-cli
                   ls -1 python_dl/*.whl >/dev/null 2>&1 || { echo "ERROR: no pmc-cli wheels vendored"; exit 1; }
                   echo "Vendored $(ls -1 python_dl/*.whl | wc -l) wheel(s)"
 
-                  echo "2) Copy built DEB packages"
-                  # assuming ESRP signed packages are here:
+                  echo "2) Copy built DEB/RPM packages"
+                  # ESRP-signed packages from the SignArtifacts stage:
                   cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
                   mkdir "$SHEXT_BUNDLE_DIR/packages"
                   cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
@@ -610,18 +603,10 @@ extends:
                   tar cvf pmc_packages.tar start.sh settings.toml packages python_dl
                   ls -al
 
-                  echo "4) Copy EV2 files to artifacts staging"
-                  cp -rv "$EV2_DIR" "$(Build.ArtifactStagingDirectory)/"
-
-              - task: ManifestGeneratorTask@0
-                inputs:
-                  BuildDropPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
-
-              - task: PublishPipelineArtifact@1
-                displayName: 'Publish EV2_PMC Artifacts'
-                inputs:
-                  targetPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC'
-                  artifact: 'drop_PublishEv2Artifacts_BuildEV2Artifacts'
+                  echo "4) Stage EV2 files to the governed output directory"
+                  mkdir -p "$(ob_outputDirectory)"
+                  cp -rv "$EV2_DIR"/ServiceGroupRoot "$(ob_outputDirectory)/"
+                displayName: 'Assemble EV2 PMC bundle'
 
           # - job: Ev2Rollout
           #   displayName: 'EV2 Rollout'
