@@ -573,6 +573,20 @@ extends:
 
               - bash: |
                   set -euxo pipefail
+
+                  echo "===== DIAGNOSTICS: layout ====="
+                  echo "PWD=$(pwd)"
+                  echo "Build.SourcesDirectory=$(Build.SourcesDirectory)"
+                  echo "Build.ArtifactStagingDirectory=$(Build.ArtifactStagingDirectory)"
+                  echo "ob_outputDirectory=$(ob_outputDirectory)"
+                  echo "--- $(Build.SourcesDirectory) (depth 2) ---"
+                  find "$(Build.SourcesDirectory)" -maxdepth 2 -print 2>/dev/null | sort || true
+                  echo "--- deploy/EV2_PMC tree ---"
+                  find "$(Build.SourcesDirectory)/deploy/EV2_PMC" -print 2>/dev/null | sort || echo "  (not found under Build.SourcesDirectory)"
+                  echo "--- any EV2_PMC dirs under /__w ---"
+                  find /__w -maxdepth 6 -type d -name EV2_PMC 2>/dev/null || true
+                  echo "===== END DIAGNOSTICS ====="
+
                   EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
                   SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
                   cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
@@ -607,6 +621,9 @@ extends:
                   echo "4) Stage EV2 files to the governed output directory"
                   mkdir -p "$(ob_outputDirectory)"
                   cp -rv "$EV2_DIR"/ServiceGroupRoot "$(ob_outputDirectory)/"
+                  echo "===== DIAGNOSTICS: published output tree ($(ob_outputDirectory)) ====="
+                  find "$(ob_outputDirectory)" -print | sort
+                  echo "===== END DIAGNOSTICS ====="
                 displayName: 'Assemble EV2 PMC bundle'
 
           # - job: Ev2Rollout
