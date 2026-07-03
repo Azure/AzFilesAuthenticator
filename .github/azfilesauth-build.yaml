@@ -626,29 +626,6 @@ extends:
                   echo "===== END DIAGNOSTICS ====="
                 displayName: 'Assemble EV2 PMC bundle'
 
-          # - job: Ev2Rollout
-          #   displayName: 'EV2 Rollout'
-          #   pool: 
-          #     type: release
-          #   dependsOn: BuildEV2Artifacts
-          #   steps:
-          #     - task: DownloadBuildArtifacts@1
-          #       displayName: 'Download PMC Artifacts'
-          #       inputs:
-          #         ArtifactName: 'ev2_pmc'
-          #         downloadPath: $(Build.ArtifactStagingDirectory)
-          #     - task: Ev2RARollout@2
-          #       inputs:
-          #         EndpointProviderType: 'ApprovalService'
-          #         ApprovalServiceEnvironment: 'Production'
-          #         TaskAction: 'registerAndRollout'
-          #         ServiceRootLocation: 'LinkedArtifact'
-          #         ServiceRootPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot'
-          #         RolloutSpecPath: '$(Build.ArtifactStagingDirectory)/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
-          #         StageMapName: 'Microsoft.Azure.SDP.Standard'
-          #         Select: regions('northeurope')
-          #         UseServerMonitorTask: true
-          #         ValidateOnly: false
               
 
 
