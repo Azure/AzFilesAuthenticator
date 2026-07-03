@@ -534,8 +534,10 @@ extends:
               LinuxContainerImage: 'mcr.microsoft.com/onebranch/azurelinux/build:3.0'
 
             steps:
-              - checkout: self
-                displayName: 'Checkout Repository'
+              # NOTE: no explicit 'checkout: self' here. OneBranch already checks out sources into
+              # $(Build.SourcesDirectory) (/__w/1/s) for managed container jobs. An explicit checkout
+              # relocates sources to a repo-named subfolder while policy blocks updating
+              # Build.SourcesDirectory, which breaks path references below.
 
               # download artifacts that need to be published
               - task: DownloadPipelineArtifact@2
