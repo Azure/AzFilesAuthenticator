@@ -77,7 +77,7 @@ extends:
               displayName: 'Checkout Repository'
 
             - script: |
-                set -x
+                set -euxo pipefail
                 uname -m
                 if [ -f /etc/os-release ]; then
                   cat /etc/os-release
@@ -91,7 +91,7 @@ extends:
               displayName: 'Build DEB Package'
 
             - script: |
-                set -x
+                set -euxo pipefail
                 mkdir -p $(Build.ArtifactStagingDirectory)/
                 cp PACKAGES/deb/*.deb $(Build.ArtifactStagingDirectory)/
               displayName: 'Stage DEB Package'
@@ -145,7 +145,7 @@ extends:
 
           steps:
             - script: |
-                set -x
+                set -euxo pipefail
                 uname -m
                 if [ -f /etc/os-release ]; then
                   cat /etc/os-release
@@ -185,7 +185,7 @@ extends:
               displayName: 'Checkout Repository'
 
             - script: |
-                set -x
+                set -euxo pipefail
                 git branch
                 git --no-pager log -n 5
                 echo "Building RPM package..."
@@ -194,7 +194,7 @@ extends:
               displayName: 'Build RPM Package'
 
             - script: |
-                set -x
+                set -euxo pipefail
                 pwd
                 echo "Copying RPM package to artifacts..."
                 mkdir -p $(Build.ArtifactStagingDirectory)
@@ -260,7 +260,7 @@ extends:
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-rpm
 
               - script: |
-                  set -x
+                  set -euxo pipefail
                   # Flatten per-matrix-leg artifact subfolders into one dir each
                   DEB_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-deb"
                   find "$DEB_DIR" -mindepth 2 -name '*.deb' -exec mv -t "$DEB_DIR" {} +
@@ -271,12 +271,12 @@ extends:
                 displayName: 'Flatten downloaded artifacts'
 
               - script: |
-                  set -x
+                  set -euxo pipefail
                   sudo ls -lRt $(Build.ArtifactStagingDirectory)
                 displayName: 'List Artifacts'
 
               - script: |
-                  set -x
+                  set -euxo pipefail
                   sudo apt -y update
                   wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
                   sudo dpkg -i packages-microsoft-prod.deb
@@ -289,7 +289,7 @@ extends:
               # To add a new distro/key: add a KEY_MAP entry below.
               # If the new distro reuses an existing key, no new ESRP task is needed.
               - script: |
-                  set -x
+                  set -euxo pipefail
                   DEFAULT_KEY="CP-450779-Pgp"
 
                   # ── Sort DEBs ──
@@ -486,7 +486,7 @@ extends:
 
               # Flatten artifacts back into single directories after signing
               - script: |
-                  set -x
+                  set -euxo pipefail
                   DEB_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-deb"
                   find "$DEB_DIR" -mindepth 2 -name '*.deb' -exec mv {} "$DEB_DIR/" \;
                   find "$DEB_DIR" -mindepth 1 -type d -empty -delete
@@ -497,7 +497,7 @@ extends:
                 displayName: 'Flatten signed artifacts'
 
               - script: |
-                  set -x
+                  set -euxo pipefail
                   echo "Preparing signed artifacts..."
                   chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-deb/*.deb
                   chmod 755 $(Build.ArtifactStagingDirectory)/azfilesauth-rpm/*.rpm
@@ -507,7 +507,7 @@ extends:
                 displayName: 'Prepare Signed Artifacts'
           
               - script: |
-                  set -x
+                  set -euxo pipefail
                   echo "Listing Signed Artifacts..."
                   ls -R $(Build.ArtifactStagingDirectory)/signed/
                 displayName: 'List Signed Artifacts'
@@ -546,6 +546,11 @@ extends:
                   artifact: 'drop_SignArtifacts_SignArtifacts'
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
+              - task: UsePythonVersion@0
+                displayName: 'Use Python >= 3.9'
+                inputs:
+                  versionSpec: '>=3.9'
+
               - task: PipAuthenticate@1
                 displayName: 'Pip Authenticate'
                 inputs:
@@ -571,6 +576,7 @@ extends:
                 displayName: 'Download EV2 Scope Bindings'
 
               - bash: |
+                  set -euxo pipefail
                   EV2_DIR="$(Build.SourcesDirectory)/deploy/EV2_PMC"
                   SHEXT_BUNDLE_DIR="$EV2_DIR/ServiceGroupRoot/Packages/ShellExt"
                   cp $(scopebindings.secureFilePath) "$EV2_DIR/ServiceGroupRoot/ScopeBindings.Prod.json"
