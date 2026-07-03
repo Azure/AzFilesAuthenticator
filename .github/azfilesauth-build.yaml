@@ -546,11 +546,6 @@ extends:
                   artifact: 'drop_SignArtifacts_SignArtifacts'
                   path: $(Build.ArtifactStagingDirectory)/azfilesauth-signed
 
-              - task: UsePythonVersion@0
-                displayName: 'Use Python >= 3.9'
-                inputs:
-                  versionSpec: '>=3.9'
-
               - task: PipAuthenticate@1
                 displayName: 'Pip Authenticate'
                 inputs:
@@ -584,9 +579,23 @@ extends:
               
                   echo "1) Get pmc-cli"
                   cd "$SHEXT_BUNDLE_DIR"
-                  mkdir python_dl
-                  pip3 download -d python_dl pmc-cli 
-                  # --python-version 3.8 --implementation cp --platform manylinux2014_x86_64 --abi cp38
+                  # Ensure pip exists in the custom build image. UsePythonVersion@0 cannot run here:
+                  # its prebuilt Python fails with 'libpython3.x.so.1.0: cannot open shared object file'.
+                  if ! python3 -m pip --version >/dev/null 2>&1; then
+                    sudo apt-get update
+                    sudo apt-get install -y python3-pip
+                  fi
+                  python3 -m pip --version
+                  rm -rf python_dl && mkdir python_dl
+                  # Vendor pmc-cli + deps for the AzureLinux 3.0 shell-ext runtime (Python 3.12),
+                  # independent of this build agent's Python version.
+                  python3 -m pip download -d python_dl pmc-cli \
+                    --only-binary=:all: --implementation cp --python-version 3.12 \
+                    --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
+                    --platform manylinux_2_28_x86_64 --platform manylinux_2_34_x86_64
+                  # Fail loudly if no wheels were vendored (prevents shipping an empty python_dl)
+                  ls -1 python_dl/*.whl >/dev/null 2>&1 || { echo "ERROR: no pmc-cli wheels vendored"; exit 1; }
+                  echo "Vendored $(ls -1 python_dl/*.whl | wc -l) wheel(s)"
 
                   echo "2) Copy built DEB packages"
                   # assuming ESRP signed packages are here:
