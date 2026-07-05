@@ -420,8 +420,12 @@ def run_azfilesauthmanager():
             i = 0
             while i < len(remaining):
                 if remaining[i] == "--identity-endpoint":
-                    if i + 1 >= len(remaining) or remaining[i + 1].startswith("--"):
-                        print("Error: --identity-endpoint requires a value")
+                    if (
+                        i + 1 >= len(remaining)
+                        or remaining[i + 1].startswith("--")
+                        or remaining[i + 1] == ""
+                    ):
+                        print("Error: --identity-endpoint requires a non-empty value")
                         print(USAGE_MESSAGE)
                         sys.exit(1)
                     identity_endpoint = remaining[i + 1]

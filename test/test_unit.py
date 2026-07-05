@@ -706,10 +706,6 @@ class TestStartDaemon(unittest.TestCase):
 
 
 # ===================================================================
-# Main
-# ===================================================================
-
-# ===================================================================
 # Test: Azure Arc managed identity support
 # ===================================================================
 
@@ -750,7 +746,6 @@ class TestIsArcEnvironment(unittest.TestCase):
 
     def test_no_endpoint(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("IDENTITY_ENDPOINT", None)
             self.assertFalse(self.mod.is_arc_environment())
 
     def test_env_var_non_loopback_ignored(self):
@@ -891,6 +886,19 @@ class TestSystemMIArgParsing(unittest.TestCase):
             saved = sys.argv
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", "--foo"]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
+                     mock.patch("os.geteuid", return_value=0):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+    def test_identity_endpoint_empty_value_rejected(self):
+        """--identity-endpoint with an empty-string value should be rejected."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", ""]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
                      mock.patch.object(self.mod, "azfiles_set_oauth"), \
                      mock.patch("os.geteuid", return_value=0):
