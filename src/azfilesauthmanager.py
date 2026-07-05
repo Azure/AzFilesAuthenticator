@@ -127,7 +127,19 @@ def is_arc_environment(identity_endpoint=None):
     # (HIMDS) endpoint via the --identity-endpoint parameter or the
     # IDENTITY_ENDPOINT environment variable, e.g.
     # http://127.0.0.1:40342/metadata/identity/oauth2/token.
-    return bool(identity_endpoint or os.environ.get("IDENTITY_ENDPOINT"))
+    #
+    # An explicit --identity-endpoint argument is always treated as an Arc
+    # request (so a misconfigured value surfaces as a clear error rather than
+    # silently falling back to VM IMDS). For the environment-variable case we
+    # additionally require the endpoint to look like local HIMDS (i.e.
+    # loopback-resolving), so unrelated services that also set
+    # IDENTITY_ENDPOINT don't accidentally route us away from VM IMDS.
+    if identity_endpoint:
+        return True
+    env_endpoint = os.environ.get("IDENTITY_ENDPOINT")
+    if env_endpoint and _is_loopback_endpoint(env_endpoint):
+        return True
+    return False
 
 
 def get_arc_oauth_token(identity_endpoint=None):

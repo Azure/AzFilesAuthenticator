@@ -753,6 +753,18 @@ class TestIsArcEnvironment(unittest.TestCase):
             os.environ.pop("IDENTITY_ENDPOINT", None)
             self.assertFalse(self.mod.is_arc_environment())
 
+    def test_env_var_non_loopback_ignored(self):
+        """Non-loopback IDENTITY_ENDPOINT env var should NOT be treated as Arc."""
+        with mock.patch.dict(os.environ, {"IDENTITY_ENDPOINT": "http://example.com/token"}):
+            with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=False):
+                self.assertFalse(self.mod.is_arc_environment())
+
+    def test_explicit_endpoint_non_loopback_still_arc(self):
+        """Explicit --identity-endpoint is always treated as Arc, even if not loopback,
+        so that a misconfigured value surfaces as a clear error later."""
+        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=False):
+            self.assertTrue(self.mod.is_arc_environment("http://example.com/token"))
+
 
 class TestGetArcOauthToken(unittest.TestCase):
     """Test get_arc_oauth_token() challenge-response flow."""
