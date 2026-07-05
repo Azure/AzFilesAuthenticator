@@ -180,12 +180,13 @@ def get_arc_oauth_token(identity_endpoint=None):
 
     # Guard against path traversal: only accept paths under /var/opt/azcmagent/tokens.
     expected_dir = "/var/opt/azcmagent/tokens/"
-    if not os.path.realpath(challenge_path).startswith(expected_dir):
+    resolved_challenge_path = os.path.realpath(challenge_path)
+    if not resolved_challenge_path.startswith(expected_dir):
         print(f"Refusing to read Arc challenge file outside {expected_dir}: {challenge_path}")
         return None
 
     try:
-        with open(challenge_path, "r") as f:
+        with open(resolved_challenge_path, "r") as f:
             secret = f.read().strip()
     except Exception as e:
         print(f"Error reading Azure Arc challenge file {challenge_path}: {e}")
@@ -400,8 +401,10 @@ def run_azfilesauthmanager():
         # System-assigned MI path
         elif is_system_mi:
             identity_endpoint = None
-            # Parse known optional flags; reject unknown arguments
-            remaining = argv[3:]  # args after 'set <endpoint> --system'
+            # Parse known optional flags; reject unknown arguments.
+            # argv layout: [prog, 'set', <endpoint>, '--system', ...optional...]
+            # Filter out the '--system' flag itself so it isn't treated as unknown.
+            remaining = [a for a in argv[3:] if a != "--system"]
             i = 0
             while i < len(remaining):
                 if remaining[i] == "--identity-endpoint":

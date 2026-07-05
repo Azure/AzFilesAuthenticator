@@ -709,10 +709,6 @@ class TestStartDaemon(unittest.TestCase):
 # Main
 # ===================================================================
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 # ===================================================================
 # Test: Azure Arc managed identity support
 # ===================================================================
@@ -889,3 +885,12 @@ class TestSystemMIArgParsing(unittest.TestCase):
                     self.mod.run_azfilesauthmanager()
             finally:
                 sys.argv = saved
+
+
+
+# ===================================================================
+# Main
+# ===================================================================
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
