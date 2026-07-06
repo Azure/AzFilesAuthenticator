@@ -730,6 +730,38 @@ class TestIsLoopbackEndpoint(unittest.TestCase):
     def test_invalid_url(self):
         self.assertFalse(self.mod._is_loopback_endpoint("not-a-url"))
 
+    def test_ipv6_loopback_shorthand(self):
+        """IPv6 loopback ``::1`` should be accepted."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("::1", 40342, 0, 0))]):
+            self.assertTrue(
+                self.mod._is_loopback_endpoint("http://[::1]:40342/metadata/identity/oauth2/token")
+            )
+
+    def test_ipv6_loopback_expanded(self):
+        """IPv6 loopback in expanded form ``0:0:0:0:0:0:0:1`` should be accepted."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("0:0:0:0:0:0:0:1", 40342, 0, 0))]):
+            self.assertTrue(
+                self.mod._is_loopback_endpoint("http://[0:0:0:0:0:0:0:1]:40342/metadata/identity/oauth2/token")
+            )
+
+    def test_ipv4_loopback_range(self):
+        """Any address in 127.0.0.0/8 should be accepted (e.g. 127.1.2.3)."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("127.1.2.3", 40342))]):
+            self.assertTrue(
+                self.mod._is_loopback_endpoint("http://127.1.2.3:40342/metadata/identity/oauth2/token")
+            )
+
+    def test_ipv6_non_loopback_rejected(self):
+        """Non-loopback IPv6 addresses should be rejected."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("2001:db8::1", 40342, 0, 0))]):
+            self.assertFalse(
+                self.mod._is_loopback_endpoint("http://[2001:db8::1]:40342/metadata/identity/oauth2/token")
+            )
+
 
 class TestIsArcEnvironment(unittest.TestCase):
     """Test is_arc_environment() detection."""
@@ -899,6 +931,19 @@ class TestSystemMIArgParsing(unittest.TestCase):
             saved = sys.argv
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", ""]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
+                     mock.patch("os.geteuid", return_value=0):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+    def test_identity_endpoint_whitespace_value_rejected(self):
+        """--identity-endpoint with a whitespace-only value should be rejected."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", "   "]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
                      mock.patch.object(self.mod, "azfiles_set_oauth"), \
                      mock.patch("os.geteuid", return_value=0):

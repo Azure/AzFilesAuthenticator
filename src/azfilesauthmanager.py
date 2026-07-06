@@ -5,6 +5,7 @@ import sys
 import subprocess
 import time
 import ctypes
+import ipaddress
 import requests
 import pwd
 
@@ -111,11 +112,19 @@ def _is_loopback_endpoint(endpoint):
         hostname = parsed.hostname
         if not hostname:
             return False
-        # Resolve hostname and check if all addresses are loopback
+        # Resolve hostname and check if all addresses are loopback.
+        # Use ipaddress.is_loopback so we correctly accept any IPv4 127.0.0.0/8
+        # address and any form of IPv6 loopback (``::1`` and its expanded
+        # ``0:0:0:0:0:0:0:1`` form), not just literal string matches.
         addrs = socket.getaddrinfo(hostname, None)
         for addr_info in addrs:
             ip = addr_info[4][0]
-            if not (ip.startswith("127.") or ip == "::1"):
+            # Strip an IPv6 scope id (e.g. ``fe80::1%eth0``) before parsing.
+            ip_no_scope = ip.split("%", 1)[0]
+            try:
+                if not ipaddress.ip_address(ip_no_scope).is_loopback:
+                    return False
+            except ValueError:
                 return False
         return True
     except Exception:
@@ -423,7 +432,7 @@ def run_azfilesauthmanager():
                     if (
                         i + 1 >= len(remaining)
                         or remaining[i + 1].startswith("--")
-                        or remaining[i + 1] == ""
+                        or remaining[i + 1].strip() == ""
                     ):
                         print("Error: --identity-endpoint requires a non-empty value")
                         print(USAGE_MESSAGE)
