@@ -167,8 +167,11 @@ def get_arc_oauth_token(identity_endpoint=None):
 
     # Security: Arc HIMDS should only be on loopback. Reject non-local endpoints
     # to prevent accidentally sending challenge secrets to remote addresses.
+    # _is_loopback_endpoint() also returns False for malformed/empty URLs, so the
+    # message covers both invalid and non-loopback endpoints. Use !r so that
+    # whitespace-only / empty values are obvious in the output.
     if not _is_loopback_endpoint(endpoint):
-        print(f"Refusing to use non-loopback identity endpoint: {endpoint}")
+        print(f"Refusing to use invalid or non-loopback identity endpoint: {endpoint!r}")
         return None
 
     params = {
