@@ -789,8 +789,7 @@ class TestIsArcEnvironment(unittest.TestCase):
     def test_explicit_endpoint_non_loopback_still_arc(self):
         """Explicit --identity-endpoint is always treated as Arc, even if not loopback,
         so that a misconfigured value surfaces as a clear error later."""
-        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=False):
-            self.assertTrue(self.mod.is_arc_environment("http://example.com/token"))
+        self.assertTrue(self.mod.is_arc_environment("http://example.com/token"))
 
 
 class TestGetArcOauthToken(unittest.TestCase):
@@ -893,8 +892,7 @@ class TestSystemMIArgParsing(unittest.TestCase):
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--bogus"]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
-                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
-                     mock.patch("os.geteuid", return_value=0):
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
                     self.mod.run_azfilesauthmanager()
             finally:
                 sys.argv = saved
@@ -906,8 +904,7 @@ class TestSystemMIArgParsing(unittest.TestCase):
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint"]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
-                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
-                     mock.patch("os.geteuid", return_value=0):
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
                     self.mod.run_azfilesauthmanager()
             finally:
                 sys.argv = saved
@@ -919,8 +916,7 @@ class TestSystemMIArgParsing(unittest.TestCase):
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", "--foo"]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
-                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
-                     mock.patch("os.geteuid", return_value=0):
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
                     self.mod.run_azfilesauthmanager()
             finally:
                 sys.argv = saved
@@ -932,8 +928,7 @@ class TestSystemMIArgParsing(unittest.TestCase):
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", ""]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
-                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
-                     mock.patch("os.geteuid", return_value=0):
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
                     self.mod.run_azfilesauthmanager()
             finally:
                 sys.argv = saved
@@ -945,8 +940,7 @@ class TestSystemMIArgParsing(unittest.TestCase):
             try:
                 sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", "   "]
                 with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
-                     mock.patch.object(self.mod, "azfiles_set_oauth"), \
-                     mock.patch("os.geteuid", return_value=0):
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
                     self.mod.run_azfilesauthmanager()
             finally:
                 sys.argv = saved
