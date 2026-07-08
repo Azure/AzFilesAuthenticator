@@ -7,9 +7,15 @@ import time
 import ctypes
 import requests
 import pwd
+from urllib.parse import urlencode
 
 
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
+MSI_ENV_FILE_PATH = "/etc/environment.sso"
+STORAGE_RESOURCE = "https://storage.azure.com"
+IMDS_TOKEN_ENDPOINT = "http://169.254.169.254/metadata/identity/oauth2/token"
+IMDS_API_VERSION = "2018-02-01"
+MSI_API_VERSION = "2017-09-01"
 
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
@@ -103,12 +109,74 @@ def init_new_user():
 
 
 def get_oauth_token(client_id=None):
-    # IMDS: system-assigned (no client_id) or user-assigned (with client_id)
-    base = "http://169.254.169.254/metadata/identity/oauth2/token"
-    params = ["api-version=2018-02-01", "resource=https://storage.azure.com"]
+    if get_env_value("MSI_ENDPOINT"):
+        return get_oauth_token_from_msi_endpoint(client_id)
+
+    return get_oauth_token_from_imds(client_id)
+
+
+def get_env_value(name):
+    value = os.environ.get(name)
+    if value:
+        return value
+
+    try:
+        with open(MSI_ENV_FILE_PATH, "r") as env_file:
+            for line in env_file:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, raw_value = line.split("=", 1)
+                if key.strip() == name:
+                    return raw_value.strip().strip("\"'")
+    except Exception:
+        return None
+
+    return None
+
+
+def get_oauth_token_from_msi_endpoint(client_id=None):
+    msi_endpoint = get_env_value("MSI_ENDPOINT")
+    msi_secret = get_env_value("MSI_SECRET")
+    if not msi_endpoint:
+        return None
+
+    params = {
+        "api-version": MSI_API_VERSION,
+        "resource": STORAGE_RESOURCE,
+    }
     if client_id:
-        params.append(f"client_id={client_id}")
-    url = base + "?" + "&".join(params)
+        params["clientid"] = client_id
+    url = msi_endpoint + ("&" if "?" in msi_endpoint else "?") + urlencode(params)
+    headers = {}
+    if msi_secret:
+        headers["Secret"] = msi_secret
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        tok = data.get("access_token")
+        if not tok:
+            print("Access token missing in MSI_ENDPOINT response")
+            return None
+        return tok
+    except Exception as e:
+        if client_id:
+            print(f"Error fetching user-assigned managed identity token from MSI_ENDPOINT: {e}")
+        else:
+            print(f"Error fetching system-assigned managed identity token from MSI_ENDPOINT: {e}")
+        return None
+
+
+def get_oauth_token_from_imds(client_id=None):
+    params = {
+        "api-version": IMDS_API_VERSION,
+        "resource": STORAGE_RESOURCE,
+    }
+    if client_id:
+        params["client_id"] = client_id
+    url = IMDS_TOKEN_ENDPOINT + "?" + urlencode(params)
     headers = {"Metadata": "true"}
 
     try:
@@ -122,9 +190,9 @@ def get_oauth_token(client_id=None):
         return tok
     except Exception as e:
         if client_id:
-            print(f"Error fetching user-assigned managed identity token: {e}")
+            print(f"Error fetching user-assigned managed identity token from IMDS: {e}")
         else:
-            print(f"Error fetching system-assigned managed identity token: {e}")
+            print(f"Error fetching system-assigned managed identity token from IMDS: {e}")
         return None
 
 def get_workload_identity_token(tenant_id, client_id, token_file, authority_host=None, resource=None):

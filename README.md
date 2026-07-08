@@ -195,7 +195,7 @@ sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net eyJ0e
 
 **2. Using System Assigned Managed Identity:**
 
-If your VM has a System Assigned Managed Identity enabled and granted access to the Azure File Share, you can use the `--system` flag. The tool will automatically fetch the token from the Azure Instance Metadata Service (IMDS).
+If your VM has a System Assigned Managed Identity enabled and granted access to the Azure File Share, you can use the `--system` flag. The tool automatically fetches the token from the configured managed identity endpoint. If `MSI_ENDPOINT` is set in the environment or `/etc/environment.sso`, that endpoint is used with the optional `MSI_SECRET` header; otherwise the tool falls back to the Azure Instance Metadata Service (IMDS).
 
 ```bash
 sudo azfilesauthmanager set <file_endpoint_uri> --system
@@ -208,7 +208,7 @@ sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --sys
 
 **3. Using User Assigned Managed Identity:**
 
-If your VM has a User Assigned Managed Identity assigned, you need to provide the Client ID of that identity.
+If your VM has a User Assigned Managed Identity assigned, you need to provide the Client ID of that identity. If `MSI_ENDPOINT` is set in the environment or `/etc/environment.sso`, the tool uses that endpoint with the optional `MSI_SECRET` header; otherwise it falls back to IMDS.
 
 ```bash
 sudo azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
