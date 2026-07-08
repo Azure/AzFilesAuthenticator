@@ -102,19 +102,15 @@ def _load_manager(fake_lib=None, config_content="KRB5_CC_NAME: /tmp/krb5cc_test\
     mod = types.ModuleType("azfilesauthmanager")
     mod.__file__ = manager_path
     mod.__builtins__ = __builtins__
+    mod.__name__ = "azfilesauthmanager"
+    fake_pwd = types.ModuleType("pwd")
+    fake_pwd.getpwuid = mock.MagicMock(return_value=types.SimpleNamespace(pw_uid=1000))
 
-    ns = dict(mod.__dict__)
-    ns["__name__"] = "azfilesauthmanager"
-
-    with mock.patch("os.path.exists", side_effect=lambda p: True if p == "/usr/lib/libazfilesauth.so" else _real_os_path_exists(p)):
-        with mock.patch("ctypes.CDLL", return_value=fake_lib):
-            code = compile(source, manager_path, "exec")
-            exec(code, ns)
-
-    # Copy all defined names back onto the module
-    for k, v in ns.items():
-        if not k.startswith("__"):
-            setattr(mod, k, v)
+    with mock.patch.dict(sys.modules, {"pwd": fake_pwd}):
+        with mock.patch("os.path.exists", side_effect=lambda p: True if p == "/usr/lib/libazfilesauth.so" else _real_os_path_exists(p)):
+            with mock.patch("ctypes.CDLL", return_value=fake_lib):
+                code = compile(source, manager_path, "exec")
+                exec(code, mod.__dict__)
 
     mod.lib = fake_lib
     return mod
@@ -162,6 +158,15 @@ class TestGetOauthToken(unittest.TestCase):
 
     def setUp(self):
         self.mod = _load_manager()
+        self.env_patch = mock.patch.dict(os.environ, {
+            "MSI_ENDPOINT": "",
+            "MSI_SECRET": "",
+            "DEFAULT_IDENTITY_CLIENT_ID": "",
+        })
+        self.env_patch.start()
+
+    def tearDown(self):
+        self.env_patch.stop()
 
     @mock.patch("requests.get")
     def test_system_assigned_returns_token(self, mock_get):
@@ -199,6 +204,94 @@ class TestGetOauthToken(unittest.TestCase):
 
         call_url = mock_get.call_args[0][0]
         self.assertIn("client_id=my-client-id", call_url)
+
+    @mock.patch("requests.get")
+    def test_msi_endpoint_passes_secret_and_clientid(self, mock_get):
+        mock_get.return_value = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "msi-endpoint-token"},
+        )
+        mock_get.return_value.raise_for_status = mock.MagicMock()
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock_get
+
+        with mock.patch.dict(os.environ, {
+            "MSI_ENDPOINT": "http://127.0.0.1:46808/MSI/token/",
+            "MSI_SECRET": "secret",
+        }):
+            token = self.mod.get_oauth_token("my-client-id")
+
+        self.assertEqual(token, "msi-endpoint-token")
+        call_url = mock_get.call_args[0][0]
+        self.assertIn("127.0.0.1:46808", call_url)
+        self.assertIn("clientid=my-client-id", call_url)
+        self.assertIn("resource=https%3A%2F%2Fstorage.azure.com", call_url)
+        self.assertEqual(mock_get.call_args.kwargs["headers"], {"Secret": "secret"})
+
+    @mock.patch("requests.get")
+    def test_msi_endpoint_without_explicit_client_id_does_not_use_default_identity_client_id(self, mock_get):
+        mock_get.return_value = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "system-token"},
+        )
+        mock_get.return_value.raise_for_status = mock.MagicMock()
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock_get
+
+        with mock.patch.dict(os.environ, {
+            "MSI_ENDPOINT": "http://127.0.0.1:46808/MSI/auth",
+            "MSI_SECRET": "secret",
+            "DEFAULT_IDENTITY_CLIENT_ID": "default-client-id",
+        }):
+            token = self.mod.get_oauth_token()
+
+        self.assertEqual(token, "system-token")
+        call_url = mock_get.call_args[0][0]
+        self.assertNotIn("clientid=", call_url)
+
+    @mock.patch("requests.get")
+    def test_msi_endpoint_reads_environment_sso_file(self, mock_get):
+        mock_get.return_value = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "file-env-token"},
+        )
+        mock_get.return_value.raise_for_status = mock.MagicMock()
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock_get
+
+        env_file = "\n".join([
+            "MSI_ENDPOINT=http://127.0.0.1:46808/MSI/auth",
+            "MSI_SECRET=file-secret",
+            "DEFAULT_IDENTITY_CLIENT_ID=file-client-id",
+        ])
+        real_open = open
+
+        def _mock_open_fn(path, *args, **kwargs):
+            if path == self.mod.MSI_ENV_FILE_PATH:
+                return mock.mock_open(read_data=env_file)()
+            return real_open(path, *args, **kwargs)
+
+        with mock.patch("builtins.open", side_effect=_mock_open_fn):
+            token = self.mod.get_oauth_token()
+
+        self.assertEqual(token, "file-env-token")
+        call_url = mock_get.call_args[0][0]
+        self.assertNotIn("clientid=", call_url)
+        self.assertEqual(mock_get.call_args.kwargs["headers"], {"Secret": "file-secret"})
+
+    @mock.patch("requests.get", side_effect=Exception("identity responder down"))
+    def test_msi_endpoint_failure_does_not_fallback_to_imds(self, mock_get):
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock_get
+
+        with mock.patch.dict(os.environ, {
+            "MSI_ENDPOINT": "http://127.0.0.1:46808/MSI/token/",
+            "MSI_SECRET": "secret",
+        }):
+            token = self.mod.get_oauth_token("my-client-id")
+
+        self.assertIsNone(token)
+        self.assertEqual(mock_get.call_count, 1)
 
     @mock.patch("requests.get")
     def test_missing_access_token_returns_none(self, mock_get):
@@ -589,7 +682,7 @@ class TestCLIArgParsing(unittest.TestCase):
         with mock.patch("builtins.open", side_effect=_mock_open_fn):
             with mock.patch("os.system", return_value=0):
                 with mock.patch("subprocess.check_output", return_value=b"1000"):
-                    with mock.patch("pwd.getpwuid", return_value=mock.MagicMock()):
+                    with mock.patch.object(mod.pwd, "getpwuid", return_value=mock.MagicMock()):
                         saved_argv = sys.argv
                         try:
                             sys.argv = argv
