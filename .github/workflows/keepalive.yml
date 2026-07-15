@@ -11,22 +11,30 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Re-enable disabled scheduled workflows
+      - name: Re-enable CodeQL workflow if disabled
         uses: actions/github-script@v7
         with:
           script: |
+            const workflowPath = '.github/workflows/codeql.yml';
             const workflows = await github.rest.actions.listRepoWorkflows({
               owner: context.repo.owner,
               repo: context.repo.repo,
             });
-            for (const wf of workflows.data.workflows) {
-              if (wf.state === 'disabled_inactivity') {
-                console.log(`Re-enabling: ${wf.name}`);
-                await github.rest.actions.enableWorkflow({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  workflow_id: wf.id,
-                });
-              }
+
+            const wf = workflows.data.workflows.find((w) => w.path === workflowPath);
+            if (!wf) {
+              core.setFailed(`Workflow not found: ${workflowPath}`);
+              return;
             }
-            console.log('Done.');
+
+            if (wf.state.startsWith('disabled')) {
+              console.log(`Re-enabling: ${wf.name} (${wf.path})`);
+              await github.rest.actions.enableWorkflow({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: wf.id,
+              });
+              console.log('Done.');
+            } else {
+              console.log(`No action needed. ${wf.name} is ${wf.state}.`);
+            }
