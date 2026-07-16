@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Ev2 Shell Extension wrapper script
 # usage: 'start.sh [rollback]'
 
@@ -38,7 +38,7 @@ PMC="pmc"
 # $PMC repo list --path-contains "sles"
 
 check_repo() {
-    if ! $PMC repo list --name "$1" | grep -q "$1"; then
+    if ! $PMC repo list --name "$1" | grep -Fq -- "$1"; then
         echo "ERROR: repo not found: $1"; exit 1
     fi
     echo "  ok: $1"

@@ -608,7 +608,7 @@ extends:
                   echo "2) Copy built DEB/RPM packages"
                   # ESRP-signed packages from the SignArtifacts stage:
                   cd "$(Build.ArtifactStagingDirectory)/azfilesauth-signed"
-                  mkdir "$SHEXT_BUNDLE_DIR/packages"
+                  mkdir -p "$SHEXT_BUNDLE_DIR/packages"
                   cp -v *.deb "$SHEXT_BUNDLE_DIR/packages/"
                   cp -v *.rpm "$SHEXT_BUNDLE_DIR/packages/"
 
