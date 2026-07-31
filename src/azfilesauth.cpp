@@ -791,14 +791,14 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
 
 int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     krb5_context context = NULL;
-    krb5_ccache ccache;
-    krb5_principal principal;
+    krb5_ccache ccache = NULL;
+    krb5_principal principal = NULL;
     krb5_error_code krb_rc;
     krb5_creds creds;
     std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* KRB5_CC_NAME;
-    krb5_principal cache_principal;
+    krb5_principal cache_principal = NULL;
     const krb5_data* realm_data;
     std::string realm;
     std::string service_principal;
