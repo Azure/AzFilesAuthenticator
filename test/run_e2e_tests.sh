@@ -42,6 +42,7 @@ TENANT_ID="${TENANT_ID:-72f988bf-86f1-41af-91ab-2d7cd011db47}"
 USER_MI_CLIENT_ID="${USER_MI_CLIENT_ID:-}"
 WORKLOAD_CLIENT_ID="${WORKLOAD_CLIENT_ID:-}"
 WORKLOAD_TOKEN_FILE="${WORKLOAD_TOKEN_FILE:-}"
+RUN_MI_LIFECYCLE_TESTS="${RUN_MI_LIFECYCLE_TESTS:-0}"
 
 # VM connection
 VM_IP="${VM_IP:-20.219.7.207}"
@@ -203,6 +204,23 @@ else
     UNIT_RESULT=1
 fi
 
+print_header "Running Managed Identity Lifecycle Scenarios"
+
+if [ "$RUN_MI_LIFECYCLE_TESTS" = "1" ]; then
+    print_info "Running test_mi_lifecycle.py against $FILE_ENDPOINT..."
+    echo ""
+
+    if python3 "$TEST_DIR/test_mi_lifecycle.py" "$FILE_ENDPOINT" --storage-account "$STORAGE_ACCOUNT" --file-share "$FILE_SHARE"; then
+        print_success "Managed identity lifecycle scenarios completed"
+        MI_RESULT=0
+    else
+        print_error "Managed identity lifecycle scenarios failed"
+        MI_RESULT=1
+    fi
+else
+    print_info "Skipping managed identity lifecycle scenarios (set RUN_MI_LIFECYCLE_TESTS=1 to enable)"
+    MI_RESULT=0
+fi
 # Run legacy integration tests only when the required config is present.
 print_header "Running Legacy Integration Tests"
 
@@ -253,11 +271,13 @@ print_header "Test Execution Summary"
 IMPORTS_STATUS=$([ $IMPORTS_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
 UNIT_STATUS=$([ $UNIT_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
 LEGACY_STATUS=$([ $LEGACY_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
+MI_STATUS=$([ $MI_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
 echo -e "Static Tests (test_imports.py): ${IMPORTS_STATUS}"
 echo -e "Unit Tests (test_unit.py): ${UNIT_STATUS}"
+echo -e "MI Lifecycle (test_mi_lifecycle.py): ${MI_STATUS}"
 echo -e "Legacy Integration (tests.py): ${LEGACY_STATUS}"
 
-if [ $IMPORTS_RESULT -eq 0 ] && [ $UNIT_RESULT -eq 0 ] && [ $LEGACY_RESULT -eq 0 ]; then
+if [ $IMPORTS_RESULT -eq 0 ] && [ $UNIT_RESULT -eq 0 ] && [ $MI_RESULT -eq 0 ] && [ $LEGACY_RESULT -eq 0 ]; then
     print_success "All tests PASSED ✓"
     exit 0
 else

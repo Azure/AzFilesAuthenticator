@@ -22,6 +22,12 @@ SLEEP_TIME = 60 * SECONDS
 REFRESH_BEFORE_EXPIRY = 5 * MINUTES 
 RUNNING = True
 
+# Test harnesses can override daemon timing without changing packaged defaults.
+SLEEP_TIME = int(os.getenv("AZFILES_REFRESH_SLEEP_SECONDS", str(SLEEP_TIME)))
+REFRESH_BEFORE_EXPIRY = int(
+    os.getenv("AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS", str(REFRESH_BEFORE_EXPIRY))
+)
+
 # Configure Logging
 logging.basicConfig(
     filename="/var/log/azfilesrefresh.log",
