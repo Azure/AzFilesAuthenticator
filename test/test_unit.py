@@ -163,64 +163,65 @@ class TestGetOauthToken(unittest.TestCase):
     def setUp(self):
         self.mod = _load_manager()
 
-    @mock.patch("requests.get")
-    def test_system_assigned_returns_token(self, mock_get):
-        mock_get.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "sys-tok-abc"},
-        )
-        mock_get.return_value.raise_for_status = mock.MagicMock()
+    def test_system_assigned_returns_token(self):
+        token_response = mock.MagicMock()
+        token_response.token = "sys-tok-abc"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
 
-        # Rebind requests inside module
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_oauth_token.__globals__, {"ManagedIdentityCredential": mock_cred}):
+            token = self.mod.get_oauth_token()
 
-        token = self.mod.get_oauth_token()
         self.assertEqual(token, "sys-tok-abc")
+        mock_cred.assert_called_once_with()
+        credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
-        # Verify IMDS was called without client_id
-        call_url = mock_get.call_args[0][0]
-        self.assertIn("169.254.169.254", call_url)
-        self.assertNotIn("client_id", call_url)
+    def test_user_assigned_passes_client_id(self):
+        token_response = mock.MagicMock()
+        token_response.token = "user-tok-xyz"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
 
-    @mock.patch("requests.get")
-    def test_user_assigned_passes_client_id(self, mock_get):
-        mock_get.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "user-tok-xyz"},
-        )
-        mock_get.return_value.raise_for_status = mock.MagicMock()
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_oauth_token.__globals__, {"ManagedIdentityCredential": mock_cred}):
+            token = self.mod.get_oauth_token("my-client-id")
 
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
-
-        token = self.mod.get_oauth_token("my-client-id")
         self.assertEqual(token, "user-tok-xyz")
+        mock_cred.assert_called_once_with(client_id="my-client-id")
+        credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
-        call_url = mock_get.call_args[0][0]
-        self.assertIn("client_id=my-client-id", call_url)
+    def test_missing_access_token_returns_none(self):
+        token_response = mock.MagicMock()
+        token_response.token = None
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
 
-    @mock.patch("requests.get")
-    def test_missing_access_token_returns_none(self, mock_get):
-        mock_get.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"something_else": "oops"},
-        )
-        mock_get.return_value.raise_for_status = mock.MagicMock()
+        with mock.patch.dict(self.mod.get_oauth_token.__globals__, {"ManagedIdentityCredential": mock.MagicMock(return_value=credential)}):
+            token = self.mod.get_oauth_token()
 
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
-
-        token = self.mod.get_oauth_token()
         self.assertIsNone(token)
 
-    @mock.patch("requests.get", side_effect=Exception("network down"))
-    def test_request_failure_returns_none(self, mock_get):
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
+    def test_request_failure_returns_none(self):
+        credential = mock.MagicMock()
+        credential.get_token.side_effect = Exception("credential unavailable")
 
-        token = self.mod.get_oauth_token()
+        with mock.patch.dict(self.mod.get_oauth_token.__globals__, {"ManagedIdentityCredential": mock.MagicMock(return_value=credential)}):
+            token = self.mod.get_oauth_token()
+
         self.assertIsNone(token)
+
+    def test_missing_sdk_dependency_returns_none(self):
+        with mock.patch.dict(
+            self.mod.get_oauth_token.__globals__,
+            {"ManagedIdentityCredential": None, "ClientAssertionCredential": None}
+        ):
+            with mock.patch("builtins.print") as mock_print:
+                token = self.mod.get_oauth_token()
+
+        self.assertIsNone(token)
+        printed = " ".join(" ".join(str(arg) for arg in call.args) for call in mock_print.call_args_list)
+        self.assertIn("Missing Python dependencies: azure-identity and azure-core", printed)
 
 
 # ===================================================================
@@ -238,67 +239,58 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         self.assertIsNone(self.mod.get_workload_identity_token("tid", "cid", None))
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
-    @mock.patch("requests.post")
-    def test_successful_token_fetch(self, mock_post):
-        mock_post.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "wi-token-123"},
-        )
-        mock_post.return_value.raise_for_status = mock.MagicMock()
+    def test_successful_token_fetch(self):
+        token_response = mock.MagicMock()
+        token_response.token = "wi-token-123"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
 
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.post = mock_post
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+            token = self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
 
-        token = self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
         self.assertEqual(token, "wi-token-123")
-
-        # Verify the AAD URL contains the tenant
-        call_url = mock_post.call_args[0][0]
-        self.assertIn("tenant-1", call_url)
-
-        # Verify the POST body
-        call_data = mock_post.call_args[1].get("data") or mock_post.call_args[0][2] if len(mock_post.call_args[0]) > 2 else mock_post.call_args[1].get("data")
-        self.assertEqual(call_data["client_id"], "client-1")
-        self.assertEqual(call_data["client_assertion"], "jwt-assertion-data")
+        kwargs = mock_cred.call_args.kwargs
+        self.assertEqual(kwargs["tenant_id"], "tenant-1")
+        self.assertEqual(kwargs["client_id"], "client-1")
+        self.assertEqual(kwargs["authority"], "https://login.microsoftonline.com")
+        self.assertEqual(kwargs["token_provider"](), "jwt-assertion-data")
+        credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
-    @mock.patch("requests.post")
-    def test_default_authority_is_public(self, mock_post):
-        mock_post.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "wi-token-123"},
-        )
-        mock_post.return_value.raise_for_status = mock.MagicMock()
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.post = mock_post
+    def test_default_authority_is_public(self):
+        token_response = mock.MagicMock()
+        token_response.token = "wi-token-123"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
 
-        self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
-        call_url = mock_post.call_args[0][0]
-        self.assertEqual(call_url, "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token")
-        call_data = mock_post.call_args[1]["data"]
-        self.assertEqual(call_data["scope"], "https://storage.azure.com/.default")
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+            self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
+
+        kwargs = mock_cred.call_args.kwargs
+        self.assertEqual(kwargs["authority"], "https://login.microsoftonline.com")
+        credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
-    @mock.patch("requests.post")
-    def test_sovereign_authority_and_resource_override(self, mock_post):
-        mock_post.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "wi-token-123"},
-        )
-        mock_post.return_value.raise_for_status = mock.MagicMock()
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.post = mock_post
+    def test_sovereign_authority_and_resource_override(self):
+        token_response = mock.MagicMock()
+        token_response.token = "wi-token-123"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
 
-        # Mooncake (Azure China) authority host; trailing slash must be normalized.
-        self.mod.get_workload_identity_token(
-            "tenant-1", "client-1", "/tok",
-            authority_host="https://login.chinacloudapi.cn/",
-            resource="https://storage.sovereign.example/",
-        )
-        call_url = mock_post.call_args[0][0]
-        self.assertEqual(call_url, "https://login.chinacloudapi.cn/tenant-1/oauth2/v2.0/token")
-        call_data = mock_post.call_args[1]["data"]
-        self.assertEqual(call_data["scope"], "https://storage.sovereign.example/.default")
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+            # Mooncake (Azure China) authority host; trailing slash must be normalized.
+            self.mod.get_workload_identity_token(
+                "tenant-1", "client-1", "/tok",
+                authority_host="https://login.chinacloudapi.cn/",
+                resource="https://storage.sovereign.example/",
+            )
+
+        kwargs = mock_cred.call_args.kwargs
+        self.assertEqual(kwargs["authority"], "https://login.chinacloudapi.cn")
+        credential.get_token.assert_called_once_with("https://storage.sovereign.example/.default")
 
 
 # ===================================================================

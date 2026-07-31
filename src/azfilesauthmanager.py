@@ -6,8 +6,15 @@ import subprocess
 import time
 import ctypes
 import pwd
-from azure.identity import ManagedIdentityCredential, ClientAssertionCredential
-from azure.core.exceptions import ClientAuthenticationError
+try:
+    from azure.identity import ManagedIdentityCredential, ClientAssertionCredential
+    from azure.core.exceptions import ClientAuthenticationError
+    AZURE_IDENTITY_IMPORT_ERROR = None
+except ImportError as e:
+    ManagedIdentityCredential = None
+    ClientAssertionCredential = None
+    ClientAuthenticationError = Exception
+    AZURE_IDENTITY_IMPORT_ERROR = e
 
 
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
@@ -48,6 +55,19 @@ lib.extern_smb_clear_credential.restype = ctypes.c_int
 lib.extern_smb_list_credential.argtypes = [ctypes.c_bool]
 lib.extern_smb_list_credential.restype = ctypes.c_int
 lib.extern_smb_version.restype = ctypes.c_char_p
+
+
+def ensure_azure_identity_dependencies():
+    if ManagedIdentityCredential is not None and ClientAssertionCredential is not None:
+        return True
+
+    print(
+        "Missing Python dependencies: azure-identity and azure-core. "
+        "Install them (e.g. 'pip3 install azure-identity azure-core') and retry."
+    )
+    if AZURE_IDENTITY_IMPORT_ERROR is not None:
+        print(f"Dependency import error: {AZURE_IDENTITY_IMPORT_ERROR}")
+    return False
 
 
 def init_new_user():
@@ -105,6 +125,9 @@ def init_new_user():
 
 def get_oauth_token(client_id=None):
     # Use ManagedIdentityCredential for IMDS: system-assigned (no client_id) or user-assigned (with client_id)
+    if not ensure_azure_identity_dependencies():
+        return None
+
     try:
         # Instantiate ManagedIdentityCredential
         # If client_id is None, it will use system-assigned managed identity
@@ -137,6 +160,9 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
         print("Error: Missing parameters for Workload Identity.")
         return None
 
+    if not ensure_azure_identity_dependencies():
+        return None
+
     try:
         with open(token_file, 'r') as f:
             client_assertion = f.read().strip()
@@ -156,12 +182,21 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
         
         # Use ClientAssertionCredential for Workload Identity Federation
         # Pass the authority as the authority parameter for sovereign cloud support
-        credential = ClientAssertionCredential(
-            tenant_id=tenant_id,
-            client_id=client_id,
-            token_provider=token_provider,
-            authority=authority
-        )
+        try:
+            credential = ClientAssertionCredential(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                token_provider=token_provider,
+                authority=authority
+            )
+        except TypeError:
+            # Backward compatibility for azure-identity versions that expect `func`.
+            credential = ClientAssertionCredential(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                func=token_provider,
+                authority=authority
+            )
         
         # Get token for Azure Storage
         scope = f"{storage_resource}/.default"
