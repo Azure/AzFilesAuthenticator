@@ -59,11 +59,15 @@ fi
 
 %post
 %systemd_post azfilesrefresh.service
-# Fallback: install Azure Python SDK via pip
-python3 -c "import azure.identity" 2>/dev/null || \
-    python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
-    python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
-    echo "WARNING: azure-identity could not be installed. Add packages.microsoft.com repo or run: pip3 install azure-identity azure-core"
+# Fallback: install Azure Python SDK via pip (set AZFILESAUTH_SKIP_PIP_INSTALL=1 to skip)
+if [ "${AZFILESAUTH_SKIP_PIP_INSTALL:-0}" -ne 1 ]; then
+    python3 -c "import azure.identity" 2>/dev/null || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
+        echo "WARNING: azure-identity could not be installed. Add packages.microsoft.com repo or run: pip3 install azure-identity azure-core"
+else
+    echo "INFO: Skipping azure-identity pip fallback because AZFILESAUTH_SKIP_PIP_INSTALL=1"
+fi
 
 %preun
 %systemd_preun azfilesrefresh.service
