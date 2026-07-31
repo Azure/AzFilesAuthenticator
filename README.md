@@ -59,6 +59,23 @@ The package location and installation steps differ depending on your Linux distr
 
 > For the full end-to-end guide (storage account setup, managed identity configuration, mounting, and troubleshooting), see [Access SMB Azure file shares by using managed identities](https://learn.microsoft.com/en-us/azure/storage/files/files-managed-identities?tabs=linux).
 
+### Python Dependencies
+
+`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`). When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script runs `pip3 install azure-identity azure-core` automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
+
+### Storage Account Prerequisite
+
+For managed identity authentication to work, the storage account must have the **SMBOAuth** feature enabled:
+
+```bash
+az storage account update \
+  --resource-group <resource-group> \
+  --name <storage-account> \
+  --enable-smb-oauth true
+```
+
+The managed identity (system or user-assigned) must also have the **Storage File Data SMB MI Admin** role assigned on the storage account.
+
 #### Azure Linux 3.0
 
 ```bash
@@ -319,9 +336,12 @@ These functions are used by the command-line utility to perform the required ope
 ## Configuration
 
 - **Configuration File:** The main configuration file is located at `/etc/azfilesauth/config.yaml`.
-- **Log Files:** Log files are located at `/var/log/syslog` (or `/var/log/messages`).
+- **Log Destination:** By default, `azfilesauth` logs to syslog (`/var/log/syslog` on Debian/Ubuntu, `/var/log/messages` on RHEL/SLES). To redirect logs to a file instead, add the following to `/etc/azfilesauth/config.yaml`:
 
-> todo: revise log files
+  ```yaml
+  LOG_DESTINATION: file
+  LOG_FILE_PATH: /var/log/azfilesauth.log
+  ```
 
 ## Security Notes
 
@@ -367,15 +387,27 @@ This indicates authentication failure.
 *   **Solution:**
     *   Check if you have a valid ticket: `sudo azfilesauthmanager list`.
     *   Verify the ticket is for the correct storage account.
-    *   Ensure the identity (User/System Managed Identity or OAuth token owner) has the **"Storage File Data SMB MI Admin"** (or Reader/Elevated Contributor) role assigned on the Storage Account.
+    *   Ensure the identity (User/System Managed Identity or OAuth token owner) has the **"Storage File Data SMB MI Admin"** role assigned on the Storage Account.
     *   Refresh the credentials: `sudo azfilesauthmanager set <url> ...`
 
-#### 3. Managed Identity Issues
+#### 3. Mount error(126) with `cruid`
+
+After authenticating, the mount command must specify `cruid=<UID>` so the kernel knows which user's Kerberos cache to look in. The UID is the `azfilesuser` account created by `azfilesauthmanager`, stored in `/etc/azfilesauth/config.yaml`:
+
+```bash
+CRUID=$(sudo awk '/USER_UID/{print $2}' /etc/azfilesauth/config.yaml)
+sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
+  -o sec=krb5,cruid=${CRUID},dir_mode=0777,file_mode=0777,serverino,nosharesock
+```
+
+#### 4. Managed Identity Issues
 *   **Symptom:** `azfilesauthmanager set ... --system` fails.
 *   **Solution:**
     *   Ensure the VM has a System Assigned Managed Identity enabled in the Azure Portal.
+    *   Ensure the storage account has SMBOAuth enabled: `az storage account update --enable-smb-oauth true`.
     *   Ensure the VM has network access to the IMDS endpoint (`169.254.169.254`).
     *   Check `curl -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/"` to verify IMDS connectivity manually.
+    *   Verify `azure-identity` is importable: `python3 -c "import azure.identity; print('OK')"`
 
 ## Packaging
 
@@ -427,8 +459,8 @@ This indicates authentication failure.
   License:        MIT
   URL:            https://example.com
   Source0:        %{name}-%{version}.tar.gz
-  BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath
-  Requires:       curl, krb5-libs, python3
+  BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
+  Requires:       curl, krb5-libs, python3, python3-pip
 
   %description
   Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
@@ -468,6 +500,20 @@ This indicates authentication failure.
   %{_libdir}/libazfilesauth.la
   %{_bindir}/azfilesauthmanager
   %config(noreplace) /etc/azfilesauth/config.yaml
+
+  %post
+  %systemd_post azfilesrefresh.service
+  # Install Azure Python SDK via pip (azure-identity not available in standard repos)
+  python3 -c "import azure.identity" 2>/dev/null || \
+      python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
+      python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
+      echo "WARNING: azure-identity could not be installed."
+
+  %preun
+  %systemd_preun azfilesrefresh.service
+
+  %postun
+  %systemd_postun_with_restart azfilesrefresh.service
 
   %changelog
   * Thu Feb 20 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
