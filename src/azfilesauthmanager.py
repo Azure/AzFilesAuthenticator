@@ -5,8 +5,9 @@ import sys
 import subprocess
 import time
 import ctypes
-import requests
 import pwd
+from azure.identity import ManagedIdentityCredential, ClientAssertionCredential
+from azure.core.exceptions import ClientAuthenticationError
 
 
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
@@ -103,23 +104,27 @@ def init_new_user():
 
 
 def get_oauth_token(client_id=None):
-    # IMDS: system-assigned (no client_id) or user-assigned (with client_id)
-    base = "http://169.254.169.254/metadata/identity/oauth2/token"
-    params = ["api-version=2018-02-01", "resource=https://storage.azure.com"]
-    if client_id:
-        params.append(f"client_id={client_id}")
-    url = base + "?" + "&".join(params)
-    headers = {"Metadata": "true"}
-
+    # Use ManagedIdentityCredential for IMDS: system-assigned (no client_id) or user-assigned (with client_id)
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        tok = data.get("access_token")
+        # Instantiate ManagedIdentityCredential
+        # If client_id is None, it will use system-assigned managed identity
+        # If client_id is provided, it will use user-assigned managed identity
+        credential = ManagedIdentityCredential(client_id=client_id) if client_id else ManagedIdentityCredential()
+        
+        # Get token for Azure Storage
+        token_response = credential.get_token("https://storage.azure.com/.default")
+        tok = token_response.token
+        
         if not tok:
-            print("Access token missing in IMDS response")
+            print("Access token missing from managed identity credential")
             return None
         return tok
+    except ClientAuthenticationError as e:
+        if client_id:
+            print(f"Error fetching user-assigned managed identity token: {e}")
+        else:
+            print(f"Error fetching system-assigned managed identity token: {e}")
+        return None
     except Exception as e:
         if client_id:
             print(f"Error fetching user-assigned managed identity token: {e}")
@@ -143,21 +148,33 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
     # Sovereign clouds (e.g. Mooncake, US Gov) pass a cloud-specific authority host.
     authority = (authority_host or "https://login.microsoftonline.com").rstrip("/")
     storage_resource = (resource or "https://storage.azure.com").rstrip("/")
-
-    url = f"{authority}/{tenant_id}/oauth2/v2.0/token"
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    data = {
-        "client_id": client_id,
-        "scope": f"{storage_resource}/.default",
-        "grant_type": "client_credentials",
-        "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-        "client_assertion": client_assertion
-    }
-
+    
     try:
-        response = requests.post(url, headers=headers, data=data, timeout=10)
-        response.raise_for_status()
-        return response.json().get("access_token")
+        # Define a token provider callback that returns the federated token
+        def token_provider():
+            return client_assertion
+        
+        # Use ClientAssertionCredential for Workload Identity Federation
+        # Pass the authority as the authority parameter for sovereign cloud support
+        credential = ClientAssertionCredential(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            token_provider=token_provider,
+            authority=authority
+        )
+        
+        # Get token for Azure Storage
+        scope = f"{storage_resource}/.default"
+        token_response = credential.get_token(scope)
+        tok = token_response.token
+        
+        if not tok:
+            print("Access token missing from workload identity credential")
+            return None
+        return tok
+    except ClientAuthenticationError as e:
+        print(f"Error fetching Workload Identity token: {e}")
+        return None
     except Exception as e:
         print(f"Error fetching Workload Identity token: {e}")
         return None

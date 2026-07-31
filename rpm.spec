@@ -8,9 +8,9 @@ URL:            https://example.com
 BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
 
 %if 0%{?suse_version}
-Requires:       curl, krb5, python3, python3-requests
+Requires:       curl, krb5, python3, python3-pip
 %else
-Requires:       curl, krb5-libs, python3, python3-requests
+Requires:       curl, krb5-libs, python3, python3-pip
 %endif
 
 %description
@@ -59,6 +59,11 @@ fi
 
 %post
 %systemd_post azfilesrefresh.service
+# Fallback: install Azure Python SDK via pip
+python3 -c "import azure.identity" 2>/dev/null || \
+    python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
+    python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
+    echo "WARNING: azure-identity could not be installed. Add packages.microsoft.com repo or run: pip3 install azure-identity azure-core"
 
 %preun
 %systemd_preun azfilesrefresh.service
