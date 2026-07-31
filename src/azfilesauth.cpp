@@ -353,7 +353,7 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
                         std::string& krb_service_ticket) 
 {
     std::string request_url;
-    CURL* curl;
+    CURL* curl = NULL;
     CURLcode curl_rc;
     struct curl_slist* headers = NULL;
     std::string auth_header;
@@ -556,7 +556,7 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     krb5_data encoded_krbcred;
     krb5_creds **decoded_cred = NULL, *creds;
     krb5_ccache cache;
-    krb5_principal client, server, existing_principal;
+    krb5_principal existing_principal;
     std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* cache_name;
@@ -910,9 +910,7 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     krb5_context context = NULL;
     krb5_ccache ccache;
     krb5_error_code krb_rc;
-    krb5_principal principal;
     krb5_creds creds;
-    krb5_creds **creds_array;
     krb5_cc_cursor cursor;
     int count = 0;
     std::ostringstream json_output;
