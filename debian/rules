@@ -5,7 +5,7 @@
 
 override_dh_auto_configure:
 	./autogen.sh || autoreconf -fi
-	./configure --prefix=/usr
+	PYTHON_SITE_PKG=/usr/lib/python3/dist-packages ./configure --prefix=/usr
 
 override_dh_auto_build:
 	make

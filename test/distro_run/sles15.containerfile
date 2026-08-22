@@ -4,7 +4,7 @@ FROM registry.suse.com/bci/bci-base:15.6
 COPY *.rpm /tmp/
 
 RUN zypper --non-interactive refresh && \
-    zypper --non-interactive install krb5 curl python3 python3-requests && \
+    zypper --non-interactive install krb5 curl python311 python311-pip && \
     rpm -ivh /tmp/azfilesauth-*.x86_64.rpm
 
 # Validate
