@@ -9,13 +9,20 @@ case "$1" in
         # This fallback handles environments where that repo is not configured.
         if [ "${AZFILESAUTH_SKIP_PIP_INSTALL:-0}" = "1" ]; then
             echo "azfilesauth: skipping azure-identity pip fallback because AZFILESAUTH_SKIP_PIP_INSTALL=1"
+            if ! python3 -c "import azure.identity" 2>/dev/null; then
+                echo "ERROR: azfilesauth requires azure-identity/azure-core to function. Install them manually or remove AZFILESAUTH_SKIP_PIP_INSTALL." >&2
+                exit 1
+            fi
         elif ! python3 -c "import azure.identity" 2>/dev/null; then
             echo "azfilesauth: azure-identity not found via apt; attempting pip install..."
-            PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 \
-                "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
-            PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 --break-system-packages \
-                "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
-                echo "WARNING: azure-identity could not be installed. Add packages.microsoft.com repo or run: pip3 install azure-identity azure-core"
+            if ! PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 \
+                "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null; then
+                if ! PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 --break-system-packages \
+                    "azure-identity>=1.14.0" "azure-core>=1.26.0"; then
+                    echo "ERROR: azfilesauth requires azure-identity and azure-core, but installation failed. Add packages.microsoft.com repo or install them manually: pip3 install azure-identity azure-core" >&2
+                    exit 1
+                fi
+            fi
         fi
         ;;
 esac

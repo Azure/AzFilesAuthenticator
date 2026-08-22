@@ -5,9 +5,13 @@ AC_PROG_CXX
 LT_INIT
 AC_PREFIX_DEFAULT(/usr)
 
-# Detect Python and get the correct site-packages directory
-AM_PATH_PYTHON([3.6])
-PYTHON_SITE_PKG=`$PYTHON -c "import sysconfig; print(sysconfig.get_path('stdlib'))"`
+# Detect Python and get the correct site-packages directory.
+# Azure Identity requires Python 3.7 or newer; the package contract uses 3.8.
+AM_PATH_PYTHON([3.8])
+AC_ARG_VAR([PYTHON_SITE_PKG], [Python site-packages directory])
+AS_IF([test -z "$PYTHON_SITE_PKG"], [
+    PYTHON_SITE_PKG=`$PYTHON -c "import sysconfig; print(sysconfig.get_path('purelib'))"`
+])
 AC_SUBST([PYTHON_SITE_PKG])
 
 AC_CONFIG_FILES([
