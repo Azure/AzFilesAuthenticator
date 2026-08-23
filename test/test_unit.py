@@ -153,6 +153,26 @@ def _load_refresh():
     return mod
 
 
+# ---------------------------------------------------------------------------
+# Helpers for mocking urllib.request.urlopen
+# ---------------------------------------------------------------------------
+
+def _fake_urlopen(payload):
+    """Return a mock object usable as a urlopen() context manager."""
+    resp = mock.MagicMock()
+    resp.read.return_value = json.dumps(payload).encode("utf-8")
+    resp.__enter__.return_value = resp
+    resp.__exit__.return_value = False
+    return resp
+
+
+def _decode_post_body(request):
+    """Decode a urllib Request's urlencoded POST body into a dict."""
+    import urllib.parse
+    body = request.data.decode("utf-8") if isinstance(request.data, bytes) else request.data
+    return {k: v[0] for k, v in urllib.parse.parse_qs(body).items()}
+
+
 # ===================================================================
 # Test: azfilesauthmanager.py — token acquisition logic
 # ===================================================================
@@ -163,62 +183,37 @@ class TestGetOauthToken(unittest.TestCase):
     def setUp(self):
         self.mod = _load_manager()
 
-    @mock.patch("requests.get")
-    def test_system_assigned_returns_token(self, mock_get):
-        mock_get.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "sys-tok-abc"},
-        )
-        mock_get.return_value.raise_for_status = mock.MagicMock()
-
-        # Rebind requests inside module
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
+    @mock.patch("urllib.request.urlopen")
+    def test_system_assigned_returns_token(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_urlopen({"access_token": "sys-tok-abc"})
 
         token = self.mod.get_oauth_token()
         self.assertEqual(token, "sys-tok-abc")
 
         # Verify IMDS was called without client_id
-        call_url = mock_get.call_args[0][0]
+        call_url = mock_urlopen.call_args[0][0].full_url
         self.assertIn("169.254.169.254", call_url)
         self.assertNotIn("client_id", call_url)
 
-    @mock.patch("requests.get")
-    def test_user_assigned_passes_client_id(self, mock_get):
-        mock_get.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "user-tok-xyz"},
-        )
-        mock_get.return_value.raise_for_status = mock.MagicMock()
-
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
+    @mock.patch("urllib.request.urlopen")
+    def test_user_assigned_passes_client_id(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_urlopen({"access_token": "user-tok-xyz"})
 
         token = self.mod.get_oauth_token("my-client-id")
         self.assertEqual(token, "user-tok-xyz")
 
-        call_url = mock_get.call_args[0][0]
+        call_url = mock_urlopen.call_args[0][0].full_url
         self.assertIn("client_id=my-client-id", call_url)
 
-    @mock.patch("requests.get")
-    def test_missing_access_token_returns_none(self, mock_get):
-        mock_get.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"something_else": "oops"},
-        )
-        mock_get.return_value.raise_for_status = mock.MagicMock()
-
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
+    @mock.patch("urllib.request.urlopen")
+    def test_missing_access_token_returns_none(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_urlopen({"something_else": "oops"})
 
         token = self.mod.get_oauth_token()
         self.assertIsNone(token)
 
-    @mock.patch("requests.get", side_effect=Exception("network down"))
-    def test_request_failure_returns_none(self, mock_get):
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.get = mock_get
-
+    @mock.patch("urllib.request.urlopen", side_effect=Exception("network down"))
+    def test_request_failure_returns_none(self, mock_urlopen):
         token = self.mod.get_oauth_token()
         self.assertIsNone(token)
 
@@ -238,56 +233,37 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         self.assertIsNone(self.mod.get_workload_identity_token("tid", "cid", None))
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
-    @mock.patch("requests.post")
-    def test_successful_token_fetch(self, mock_post):
-        mock_post.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "wi-token-123"},
-        )
-        mock_post.return_value.raise_for_status = mock.MagicMock()
-
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.post = mock_post
+    @mock.patch("urllib.request.urlopen")
+    def test_successful_token_fetch(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_urlopen({"access_token": "wi-token-123"})
 
         token = self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
         self.assertEqual(token, "wi-token-123")
 
         # Verify the AAD URL contains the tenant
-        call_url = mock_post.call_args[0][0]
+        call_url = mock_urlopen.call_args[0][0].full_url
         self.assertIn("tenant-1", call_url)
 
         # Verify the POST body
-        call_data = mock_post.call_args[1].get("data") or mock_post.call_args[0][2] if len(mock_post.call_args[0]) > 2 else mock_post.call_args[1].get("data")
+        call_data = _decode_post_body(mock_urlopen.call_args[0][0])
         self.assertEqual(call_data["client_id"], "client-1")
         self.assertEqual(call_data["client_assertion"], "jwt-assertion-data")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
-    @mock.patch("requests.post")
-    def test_default_authority_is_public(self, mock_post):
-        mock_post.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "wi-token-123"},
-        )
-        mock_post.return_value.raise_for_status = mock.MagicMock()
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.post = mock_post
+    @mock.patch("urllib.request.urlopen")
+    def test_default_authority_is_public(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_urlopen({"access_token": "wi-token-123"})
 
         self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
-        call_url = mock_post.call_args[0][0]
+        call_url = mock_urlopen.call_args[0][0].full_url
         self.assertEqual(call_url, "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token")
-        call_data = mock_post.call_args[1]["data"]
+        call_data = _decode_post_body(mock_urlopen.call_args[0][0])
         self.assertEqual(call_data["scope"], "https://storage.azure.com/.default")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
-    @mock.patch("requests.post")
-    def test_sovereign_authority_and_resource_override(self, mock_post):
-        mock_post.return_value = mock.MagicMock(
-            status_code=200,
-            json=lambda: {"access_token": "wi-token-123"},
-        )
-        mock_post.return_value.raise_for_status = mock.MagicMock()
-        self.mod.requests = mock.MagicMock()
-        self.mod.requests.post = mock_post
+    @mock.patch("urllib.request.urlopen")
+    def test_sovereign_authority_and_resource_override(self, mock_urlopen):
+        mock_urlopen.return_value = _fake_urlopen({"access_token": "wi-token-123"})
 
         # Mooncake (Azure China) authority host; trailing slash must be normalized.
         self.mod.get_workload_identity_token(
@@ -295,9 +271,9 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
             authority_host="https://login.chinacloudapi.cn/",
             resource="https://storage.sovereign.example/",
         )
-        call_url = mock_post.call_args[0][0]
+        call_url = mock_urlopen.call_args[0][0].full_url
         self.assertEqual(call_url, "https://login.chinacloudapi.cn/tenant-1/oauth2/v2.0/token")
-        call_data = mock_post.call_args[1]["data"]
+        call_data = _decode_post_body(mock_urlopen.call_args[0][0])
         self.assertEqual(call_data["scope"], "https://storage.sovereign.example/.default")
 
 

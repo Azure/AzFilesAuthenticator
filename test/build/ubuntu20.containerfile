@@ -7,6 +7,7 @@ RUN apt-get update && \
     apt-get install -y software-properties-common && \
     add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu focal-backports main" && \
     apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y git autoconf libtool build-essential python3 \
         libcurl4-openssl-dev libkrb5-dev && \
     apt-get install -y -t focal-backports debhelper && \

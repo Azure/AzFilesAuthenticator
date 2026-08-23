@@ -1,7 +1,8 @@
 # Build azfilesauth RPM on RHEL 10
 FROM registry.access.redhat.com/ubi10/ubi:latest
 
-RUN dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
+RUN dnf -y update && \
+    dnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
         python3-devel libcurl-devel krb5-devel chrpath git automake \
         binutils glibc-devel kernel-headers && \
     dnf clean all

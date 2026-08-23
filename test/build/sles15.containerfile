@@ -2,6 +2,7 @@
 FROM registry.suse.com/bci/bci-base:15.6
 
 RUN zypper --non-interactive refresh && \
+    zypper --non-interactive update && \
     zypper --non-interactive install \
         rpm-build autoconf libtool make gcc gcc-c++ \
         python3-devel python3 libcurl-devel krb5-devel chrpath git automake \

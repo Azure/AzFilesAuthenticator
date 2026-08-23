@@ -6,7 +6,9 @@ import sys
 import subprocess
 import time
 import ctypes
-import requests
+import urllib.request
+import urllib.parse
+import urllib.error
 import json
 
 LOG_FILE = "/var/log/azfilestests.log"
@@ -116,20 +118,21 @@ def get_oauth_token():
     }
     
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    
+
     try:
-        response = requests.post(token_url, data=body, headers=headers)
-        response.raise_for_status()
-        return response.json().get("access_token")
-    
-    except requests.exceptions.HTTPError as http_err:
+        body_data = urllib.parse.urlencode(body).encode("utf-8")
+        req = urllib.request.Request(token_url, data=body_data, headers=headers, method="POST")
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read().decode("utf-8")).get("access_token")
+
+    except urllib.error.HTTPError as http_err:
         print(f"HTTP error occurred: {http_err}")
-        print(f"Response: {response.text}")
-    except requests.exceptions.RequestException as req_err:
+        print(f"Response: {http_err.read().decode('utf-8', errors='replace')}")
+    except urllib.error.URLError as req_err:
         print(f"Request error occurred: {req_err}")
     except Exception as err:
         print(f"An unexpected error occurred: {err}")
-    
+
     return None
 
 
