@@ -483,6 +483,111 @@ class TestGetMountOptions(unittest.TestCase):
 
 
 # ===================================================================
+# Test: azfilesrefresh.py.in — fstab option parsing
+# ===================================================================
+
+class TestGetFstabOptions(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = _load_refresh()
+
+    def test_parses_only_opted_in_kerberos_cifs_mounts(self):
+        fstab = (
+            "# Azure Files mounts\n"
+            "//system.file.core.windows.net/share /mnt/system cifs "
+            "sec=krb5,username=root,x-systemd.requires=azfilesrefresh.service 0 0\n"
+            "//user.file.core.windows.net/share /mnt/user cifs "
+            "rw,x-systemd.requires=azfilesrefresh.service,username=my-client-id,sec=krb5 0 0\n"
+            "//no-service.file.core.windows.net/share /mnt/other cifs "
+            "sec=krb5,username=root 0 0\n"
+            "//ntlm.file.core.windows.net/share /mnt/ntlm cifs "
+            "sec=ntlmssp,username=root,x-systemd.requires=azfilesrefresh.service 0 0\n"
+            "/dev/sda1 / ext4 defaults,x-systemd.requires=azfilesrefresh.service 0 1\n"
+        )
+
+        with mock.patch("builtins.open", mock.mock_open(read_data=fstab)):
+            id_map = self.mod.get_fstab_options()
+
+        self.assertEqual(id_map, {
+            "system.file.core.windows.net": "root",
+            "user.file.core.windows.net": "my-client-id",
+        })
+
+    def test_missing_fstab_returns_empty(self):
+        with mock.patch("builtins.open", side_effect=FileNotFoundError):
+            self.assertEqual(self.mod.get_fstab_options(), {})
+
+    @mock.patch("subprocess.run")
+    def test_client_id_falls_back_to_fstab(self, mock_run):
+        mock_run.return_value = mock.MagicMock(stdout=b"", stderr=b"")
+        fstab = (
+            "//account.file.core.windows.net/share /mnt/share cifs "
+            "sec=krb5,username=my-client-id,x-systemd.requires=azfilesrefresh.service 0 0\n"
+        )
+
+        with mock.patch("builtins.open", mock.mock_open(read_data=fstab)):
+            client_id = self.mod.get_client_id("account.file.core.windows.net")
+
+        self.assertEqual(client_id, "my-client-id")
+
+
+# ===================================================================
+# Test: azfilesrefresh.py.in — boot-time provisioning from fstab
+# ===================================================================
+
+class TestProvisionFstabTickets(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = _load_refresh()
+        self.mod._fake_azfilesauth.get_oauth_token.reset_mock()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.reset_mock()
+
+    def test_provisions_ticket_for_each_fstab_entry(self):
+        fstab = (
+            "//system.file.core.windows.net/share /mnt/system cifs "
+            "sec=krb5,username=root,x-systemd.requires=azfilesrefresh.service 0 0\n"
+            "//user.file.core.windows.net/share /mnt/user cifs "
+            "sec=krb5,username=my-client-id,x-systemd.requires=azfilesrefresh.service 0 0\n"
+        )
+        self.mod._fake_azfilesauth.get_oauth_token.return_value = "tok"
+
+        with mock.patch("builtins.open", mock.mock_open(read_data=fstab)):
+            self.mod.provision_fstab_tickets()
+
+        # System-assigned MI (username=root) => no client_id; user-assigned => client_id passed.
+        self.mod._fake_azfilesauth.get_oauth_token.assert_any_call()
+        self.mod._fake_azfilesauth.get_oauth_token.assert_any_call("my-client-id")
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_any_call(
+            "https://system.file.core.windows.net", "tok"
+        )
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_any_call(
+            "https://user.file.core.windows.net", "tok"
+        )
+
+    def test_no_entries_provisions_nothing(self):
+        with mock.patch("builtins.open", mock.mock_open(read_data="")):
+            self.mod.provision_fstab_tickets()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_not_called()
+
+    def test_one_failure_does_not_stop_others(self):
+        fstab = (
+            "//good.file.core.windows.net/share /mnt/good cifs "
+            "sec=krb5,username=root,x-systemd.requires=azfilesrefresh.service 0 0\n"
+            "//bad.file.core.windows.net/share /mnt/bad cifs "
+            "sec=krb5,username=other,x-systemd.requires=azfilesrefresh.service 0 0\n"
+        )
+        # First endpoint (root) gets a token; second (other) fails to get one.
+        self.mod._fake_azfilesauth.get_oauth_token.side_effect = ["tok", None]
+
+        with mock.patch("builtins.open", mock.mock_open(read_data=fstab)):
+            self.mod.provision_fstab_tickets()
+
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_called_once_with(
+            "https://good.file.core.windows.net", "tok"
+        )
+
+
+# ===================================================================
 # Test: azfilesrefresh.py.in — refresh_ticket dispatch
 # ===================================================================
 

@@ -1,8 +1,13 @@
 [Unit]
 Description=Azure Files Refresh Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
+Before=remote-fs-pre.target
 
 [Service]
+Type=simple
+# Create tickets for opted-in /etc/fstab entries before dependent mounts run.
+ExecStartPre=/usr/bin/azfilesrefresh --provision
 ExecStart=/usr/bin/azfilesrefresh
 Restart=on-failure
 User=root
