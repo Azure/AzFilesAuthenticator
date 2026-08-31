@@ -37,7 +37,7 @@ extends:
           type: release
         steps:
           - download: azfilesauthenticator-build
-            artifact: EV2_PMC
+            artifact: drop_PublishEv2Artifacts_BuildEV2Artifacts
           - task: vsrm-ev2.ev2-rollout.ev2-rollout-task.Ev2RARollout@2
             inputs:
               EndpointProviderType: ApprovalService
@@ -45,8 +45,8 @@ extends:
               TaskAction: RegisterAndRollout
               SkipRegistrationIfExists: true
               RolloutType: normal
-              ServiceRootPath: '$(Pipeline.Workspace)/azfilesauthenticator-build/EV2_PMC/ServiceGroupRoot'
-              RolloutSpecPath: '$(Pipeline.Workspace)/azfilesauthenticator-build/EV2_PMC/ServiceGroupRoot/RolloutSpec.Prod.json'
+              ServiceRootPath: '$(Pipeline.Workspace)/azfilesauthenticator-build/drop_PublishEv2Artifacts_BuildEV2Artifacts/ServiceGroupRoot'
+              RolloutSpecPath: '$(Pipeline.Workspace)/azfilesauthenticator-build/drop_PublishEv2Artifacts_BuildEV2Artifacts/ServiceGroupRoot/RolloutSpec.Prod.json'
               StageMapName: "Microsoft.Azure.SDP.Standard"
               Select: 'regions(eastus)'
               ForceRegistration: True
