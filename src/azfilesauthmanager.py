@@ -172,9 +172,11 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
 
     # Default to public Azure AD / storage resource.
     # Sovereign clouds (e.g. Mooncake, US Gov) pass a cloud-specific authority host.
+    # The resource is the base URI without the `/.default` scope suffix. This
+    # matches the Azure Files CSI driver's resource configuration.
     authority = (authority_host or "https://login.microsoftonline.com").rstrip("/")
     storage_resource = (resource or "https://storage.azure.com").rstrip("/")
-    
+
     try:
         # Define a token provider callback that returns the federated token
         def token_provider():
@@ -182,22 +184,13 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
         
         # Use ClientAssertionCredential for Workload Identity Federation
         # Pass the authority as the authority parameter for sovereign cloud support
-        try:
-            credential = ClientAssertionCredential(
-                tenant_id=tenant_id,
-                client_id=client_id,
-                token_provider=token_provider,
-                authority=authority
-            )
-        except TypeError:
-            # Backward compatibility for azure-identity versions that expect `func`.
-            credential = ClientAssertionCredential(
-                tenant_id=tenant_id,
-                client_id=client_id,
-                func=token_provider,
-                authority=authority
-            )
-        
+        credential = ClientAssertionCredential(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            func=token_provider,
+            authority=authority,
+        )
+
         # Get token for Azure Storage
         scope = f"{storage_resource}/.default"
         token_response = credential.get_token(scope)
