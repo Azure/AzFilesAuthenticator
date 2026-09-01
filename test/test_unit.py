@@ -191,6 +191,19 @@ class TestGetOauthToken(unittest.TestCase):
         mock_cred.assert_called_once_with(client_id="my-client-id")
         credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
+    def test_empty_client_id_uses_system_assigned_identity(self):
+        token_response = mock.MagicMock()
+        token_response.token = "sys-tok-empty"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
+
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_oauth_token.__globals__, {"ManagedIdentityCredential": mock_cred}):
+            token = self.mod.get_oauth_token("")
+
+        self.assertEqual(token, "sys-tok-empty")
+        mock_cred.assert_called_once_with()
+
     def test_missing_access_token_returns_none(self):
         token_response = mock.MagicMock()
         token_response.token = None
@@ -254,7 +267,7 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         self.assertEqual(kwargs["tenant_id"], "tenant-1")
         self.assertEqual(kwargs["client_id"], "client-1")
         self.assertEqual(kwargs["authority"], "https://login.microsoftonline.com")
-        self.assertEqual(kwargs["token_provider"](), "jwt-assertion-data")
+        self.assertEqual(kwargs["func"](), "jwt-assertion-data")
         credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
@@ -270,6 +283,22 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
 
         kwargs = mock_cred.call_args.kwargs
         self.assertEqual(kwargs["authority"], "https://login.microsoftonline.com")
+        credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
+
+    @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
+    def test_resource_is_used_as_base_uri(self):
+        token_response = mock.MagicMock()
+        token_response.token = "wi-token-123"
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
+
+        mock_cred = mock.MagicMock(return_value=credential)
+        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+            self.mod.get_workload_identity_token(
+                "tenant-1", "client-1", "/tok",
+                resource="https://storage.azure.com/",
+            )
+
         credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))

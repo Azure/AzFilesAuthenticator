@@ -240,6 +240,8 @@ sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --imd
 
 If your workload is running in a Kubernetes environment with Workload Identity Federation configured, you can authenticate using a federated token. You need to provide the Tenant ID, Client ID, and the path to the projected service account token file.
 
+For sovereign clouds, `--authority-host` selects the Microsoft Entra authority and `--resource` selects the Azure Storage resource. Pass `--resource` as the base resource URI, without the `/.default` suffix; the manager adds that suffix when requesting the token. For example, use `https://storage.azure.com/`, not `https://storage.azure.com/.default`. This matches the [Azure Files CSI driver](https://github.com/kubernetes-sigs/azurefile-csi-driver/blob/master/pkg/azurefile/azurefile.go), which supplies the storage resource without `/.default`.
+
 ```bash
 sudo azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file>
 ```
