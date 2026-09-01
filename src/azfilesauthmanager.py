@@ -6,6 +6,7 @@ import subprocess
 import time
 import ctypes
 import pwd
+import json
 try:
     import yaml
     YAML_IMPORT_ERROR = None
@@ -25,6 +26,8 @@ except ImportError as e:
 
 
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
+AUTH_STATE_DIR = "/run/azfilesauth"
+AUTH_STATE_FILE_PATH = f"{AUTH_STATE_DIR}/endpoint-auth-state.json"
 
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
@@ -284,6 +287,76 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
         return None
 
 
+def _normalize_endpoint(file_endpoint_uri):
+    return str(file_endpoint_uri).strip().rstrip("/")
+
+
+def _read_auth_state():
+    try:
+        with open(AUTH_STATE_FILE_PATH, "r") as state_file:
+            state = json.load(state_file)
+        return state if isinstance(state, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_auth_state(state):
+    try:
+        os.makedirs(AUTH_STATE_DIR, mode=0o750, exist_ok=True)
+        os.chmod(AUTH_STATE_DIR, 0o750)
+        with open(AUTH_STATE_FILE_PATH, "w") as state_file:
+            os.chmod(AUTH_STATE_FILE_PATH, 0o640)
+            json.dump(state, state_file, indent=2, sort_keys=True)
+            state_file.write("\n")
+    except OSError:
+        print(f"Error writing auth metadata to {AUTH_STATE_FILE_PATH}")
+        sys.exit(1)
+
+
+def get_endpoint_auth_metadata(file_endpoint_uri):
+    endpoint = _normalize_endpoint(file_endpoint_uri)
+    if not endpoint:
+        return None
+
+    return _read_auth_state().get(endpoint)
+
+
+def set_endpoint_auth_metadata(file_endpoint_uri, auth_mode, tenant_id=None, client_id=None, token_file=None, authority_host=None, resource=None):
+    endpoint = _normalize_endpoint(file_endpoint_uri)
+    if not endpoint or not auth_mode:
+        return
+
+    metadata = {"auth_mode": auth_mode}
+    optional_metadata = {
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "token_file": token_file,
+        "authority_host": authority_host,
+        "resource": resource,
+    }
+    for metadata_key in optional_metadata:
+        metadata_value = optional_metadata[metadata_key]
+        if metadata_value is not None:
+            metadata[metadata_key] = metadata_value
+
+    state = _read_auth_state()
+    state[endpoint] = metadata
+    _write_auth_state(state)
+
+
+def clear_endpoint_auth_metadata(file_endpoint_uri):
+    endpoint = _normalize_endpoint(file_endpoint_uri)
+    if not endpoint:
+        return
+
+    state = _read_auth_state()
+    if endpoint not in state:
+        return
+
+    del state[endpoint]
+    _write_auth_state(state)
+
+
 def azfiles_set_oauth(file_endpoint_uri, oauth_token):
 
     validity_in_sec = ctypes.c_uint()
@@ -305,6 +378,7 @@ def azfiles_set_oauth(file_endpoint_uri, oauth_token):
 
 
 def azfiles_clear(file_endpoint_uri):
+    clear_endpoint_auth_metadata(file_endpoint_uri)
 
     try:
         rc = lib.extern_smb_clear_credential(file_endpoint_uri.encode())
@@ -406,6 +480,7 @@ def run_azfilesauthmanager():
             oauth_token = get_oauth_token(client_id)
             if oauth_token is None:
                 sys.exit(1)
+            set_endpoint_auth_metadata(file_endpoint_uri, "user-assigned", client_id=client_id)
         # System-assigned MI path
         elif is_system_mi:
             if len(argv) != 4:  # set <endpoint> --system
@@ -414,6 +489,7 @@ def run_azfilesauthmanager():
             oauth_token = get_oauth_token()
             if oauth_token is None:
                 sys.exit(1)
+            set_endpoint_auth_metadata(file_endpoint_uri, "system")
         # Workload Identity path
         elif is_workload_identity:
             tenant_id = None
@@ -451,6 +527,15 @@ def run_azfilesauthmanager():
             )
             if oauth_token is None:
                 sys.exit(1)
+            set_endpoint_auth_metadata(
+                file_endpoint_uri,
+                "workload-identity",
+                tenant_id=tenant_id,
+                client_id=client_id,
+                token_file=token_file,
+                authority_host=authority_host,
+                resource=resource,
+            )
         else:
             # Direct token form: set <endpoint> <oauth_token>
             if len(argv) != 4:

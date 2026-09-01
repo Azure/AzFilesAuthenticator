@@ -337,7 +337,8 @@ These functions are used by the command-line utility to perform the required ope
 
 ## Configuration
 
-- **Configuration File:** The main configuration file is located at `/etc/azfilesauth/config.yaml`.
+- **Configuration File:** User-managed settings such as `KRB5_CC_NAME` and `USER_UID` are stored in `/etc/azfilesauth/config.yaml`.
+- **Runtime Authentication State:** Endpoint authentication metadata used by `azfilesrefresh` is stored as JSON in `/run/azfilesauth/endpoint-auth-state.json` and is recreated when authentication is configured. It is runtime state, not user configuration, and is cleared on reboot.
 - **Log Destination:** By default, `azfilesauth` logs to syslog (`/var/log/syslog` on Debian/Ubuntu, `/var/log/messages` on RHEL/SLES). To redirect logs to a file instead, add the following to `/etc/azfilesauth/config.yaml`:
 
   ```yaml
