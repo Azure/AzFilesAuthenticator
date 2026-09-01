@@ -137,6 +137,8 @@ def _load_refresh():
     fake_azfilesauth = types.ModuleType("azfilesauth")
     fake_azfilesauth.azfiles_set_oauth = mock.MagicMock()
     fake_azfilesauth.get_oauth_token = mock.MagicMock(return_value="fake-token-123")
+    fake_azfilesauth.get_workload_identity_token = mock.MagicMock(return_value="fake-workload-token-123")
+    fake_azfilesauth.get_endpoint_auth_metadata = mock.MagicMock(return_value=None)
     fake_azfilesauth.init_new_user = mock.MagicMock()
 
     pre_patch = {"azfilesauth": fake_azfilesauth}
@@ -572,6 +574,42 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
 
 
 # ===================================================================
+# Test: azfilesauthmanager.py — runtime endpoint auth metadata
+# ===================================================================
+
+class TestEndpointAuthMetadata(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_metadata_uses_runtime_state_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+            state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+            with mock.patch.dict(
+                self.mod.get_endpoint_auth_metadata.__globals__,
+                {
+                    "AUTH_STATE_DIR": state_dir,
+                    "AUTH_STATE_FILE_PATH": state_file,
+                },
+            ):
+                self.mod.set_endpoint_auth_metadata(
+                    "https://account.file.core.windows.net",
+                    "workload-identity",
+                    tenant_id="tenant-1",
+                    client_id="client-1",
+                    token_file="/tmp/token",
+                )
+
+                metadata = self.mod.get_endpoint_auth_metadata(
+                    "https://account.file.core.windows.net"
+                )
+
+            self.assertEqual(metadata["auth_mode"], "workload-identity")
+            self.assertTrue(os.path.exists(state_file))
+
+
+# ===================================================================
 # Test: azfilesauthmanager.py — native lib wrappers
 # ===================================================================
 
@@ -855,6 +893,45 @@ class TestRefreshTicket(unittest.TestCase):
 
         # Should call get_oauth_token with the client_id
         self.mod._fake_azfilesauth.get_oauth_token.assert_called_once_with("my-client-id")
+
+    @mock.patch("subprocess.run")
+    def test_refresh_uses_workload_identity_metadata_when_present(self, mock_run):
+        mount_output = (
+            "//account.file.core.windows.net/share on /mnt type cifs "
+            "(rw,sec=krb5,username=workload-client-id,uid=0)\n"
+        )
+        mock_run.return_value = mock.MagicMock(
+            stdout=mount_output.encode("utf-8"),
+            stderr=b"",
+        )
+
+        self.mod._fake_azfilesauth.get_endpoint_auth_metadata.return_value = {
+            "auth_mode": "workload-identity",
+            "tenant_id": "tenant-1",
+            "client_id": "workload-client-id",
+            "token_file": "/tmp/token",
+            "authority_host": "https://login.microsoftonline.com",
+            "resource": "https://storage.azure.com",
+        }
+        self.mod._fake_azfilesauth.get_oauth_token.reset_mock()
+        self.mod._fake_azfilesauth.get_workload_identity_token.return_value = "workload-token"
+        self.mod._fake_azfilesauth.get_workload_identity_token.reset_mock()
+        self.mod._fake_azfilesauth.get_workload_identity_token.return_value = "workload-token"
+        self.mod._fake_azfilesauth.azfiles_set_oauth.reset_mock()
+
+        ticket = {"server": "cifs/account.file.core.windows.net@REALM"}
+        self.mod.refresh_ticket(ticket)
+
+        self.mod._fake_azfilesauth.get_workload_identity_token.assert_called_once_with(
+            "tenant-1",
+            "workload-client-id",
+            "/tmp/token",
+            authority_host="https://login.microsoftonline.com",
+            resource="https://storage.azure.com",
+        )
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_called_once_with(
+            "https://account.file.core.windows.net", "workload-token"
+        )
 
 
 # ===================================================================
