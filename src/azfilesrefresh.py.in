@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "@PYTHON_SITE_PKG@")
 
-from azfilesauth import azfiles_set_oauth, get_oauth_token, get_workload_identity_token, get_endpoint_auth_metadata, init_new_user
+from azfilesauth import azfiles_set_oauth, get_oauth_token, get_endpoint_auth_metadata, init_new_user, AuthMetadataConflict
 import subprocess
 import os
 import json
@@ -158,35 +158,43 @@ def refresh_ticket(ticket):
 
         log_status(f"Refresh token for {endpoint} initiated (metadata={metadata is not None}, mount username={client_id})")
 
+        # Track the identity actually used for this refresh so azfiles_set_oauth can
+        # re-validate it against current metadata (under its own lock) at write time,
+        # instead of trusting the metadata snapshot read above, which may be stale by
+        # the time the (possibly slow) token fetch below completes.
+        refresh_auth_mode = None
+        refresh_identity_kwargs = {}
+
         if metadata:
             auth_mode = metadata.get("auth_mode")
             if auth_mode == "system":
+                if client_id and client_id != "root":
+                    log_error(
+                        f"Skipping refresh for {endpoint}: system auth mode but mount user={client_id} does not match the stored identity."
+                    )
+                    return
                 log_status(f"Using system-assigned managed identity for {endpoint}")
                 oauth_token = get_oauth_token()
+                refresh_auth_mode = "system"
             elif auth_mode == "user-assigned":
                 refresh_client_id = metadata.get("client_id") or client_id
                 if not refresh_client_id:
                     log_error(f"Skipping refresh. No client_id available for user-assigned MI on {endpoint}")
                     return
+                if client_id and refresh_client_id != client_id:
+                    log_error(
+                        f"Skipping refresh for {endpoint}: persisted client_id={refresh_client_id} does not match mount user={client_id}."
+                    )
+                    return
                 log_status(f"Using user-assigned managed identity for {endpoint} with client_id={refresh_client_id}")
                 oauth_token = get_oauth_token(refresh_client_id)
+                refresh_auth_mode = "user-assigned"
+                refresh_identity_kwargs = {"client_id": refresh_client_id}
             elif auth_mode == "workload-identity":
-                tenant_id = metadata.get("tenant_id")
+                # Refreshing workload identities are not a requirement today. Skip these.
                 refresh_client_id = metadata.get("client_id") or client_id
-                token_file = metadata.get("token_file")
-                authority_host = metadata.get("authority_host")
-                resource = metadata.get("resource")
-                if not all([tenant_id, refresh_client_id, token_file]):
-                    log_error(f"Skipping refresh. Incomplete workload identity metadata for {endpoint}")
-                    return
-                log_status(f"Using workload identity for {endpoint} with client_id={refresh_client_id}")
-                oauth_token = get_workload_identity_token(
-                    tenant_id,
-                    refresh_client_id,
-                    token_file,
-                    authority_host=authority_host,
-                    resource=resource,
-                )
+                log_status(f"Skipping workload identity for {endpoint} with client_id={refresh_client_id}")
+                return
             else:
                 log_error(f"Skipping refresh. Unsupported auth mode '{auth_mode}' for {endpoint}")
                 return
@@ -199,13 +207,20 @@ def refresh_ticket(ticket):
             if client_id == "root":
                 log_status(f"username=root for {endpoint}; using system-assigned managed identity")
                 oauth_token = get_oauth_token()
+                refresh_auth_mode = "system"
             else:
                 log_status(f"Using client_id '{client_id}' for user-assigned managed identity")
                 oauth_token = get_oauth_token(client_id)
+                refresh_auth_mode = "user-assigned"
+                refresh_identity_kwargs = {"client_id": client_id}
 
         if oauth_token is None:
             raise Exception(f"Unable to obtain OAuth token for {endpoint}")
-        azfiles_set_oauth(full_endpoint, oauth_token)
+        try:
+            azfiles_set_oauth(full_endpoint, oauth_token, auth_mode=refresh_auth_mode, **refresh_identity_kwargs)
+        except AuthMetadataConflict as e:
+            log_error(f"Skipping refresh for {endpoint}: identity changed since metadata was read ({e}).")
+            return
         log_status(f"Ticket for {endpoint} refreshed")
     except Exception as e:
         log_error(f"Error refreshing ticket: {e}")

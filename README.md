@@ -251,6 +251,20 @@ sudo azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id 
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --workload-identity --tenant-id 00000000-0000-0000-0000-000000000000 --client-id 00000000-0000-0000-0000-000000000000 --token-file /var/run/secrets/azure/tokens/azure-identity-token
 ```
 
+**Overriding a conflicting identity with `--force`:**
+
+Each endpoint's identity (auth mode, client ID, tenant ID) is persisted so `azfilesrefresh` can refresh it later. If a `set` targets an endpoint already associated with a *different* identity, the command is refused by default so credentials aren't silently swapped out from under another identity's ticket:
+
+```text
+[-] Refusing to set credential: Endpoint https://mystorageaccount.file.core.windows.net: existing auth_mode='user-assigned' does not match requested auth_mode='system'
+```
+
+If you understand the risk and want to proceed anyway, pass `--force` with `--system`, `--imds-client-id`, or `--workload-identity` to overwrite the existing identity for that endpoint:
+
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --system --force
+```
+
 #### Clear Credentials
 
 Clears the Kerberos credentials for the specified storage account endpoint from the cache specified by the `KRB5_CC_NAME` variable in `/etc/azfilesauth/config.yaml` (or the default cache if not specified).

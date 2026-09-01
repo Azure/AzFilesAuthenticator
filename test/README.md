@@ -70,14 +70,26 @@ Class: `TestGetWorkloadIdentityToken`
 - `test_resource_is_used_as_base_uri`: verifies a trailing slash is normalized and `/.default` is appended exactly once.
 - `test_sovereign_authority_and_resource_override`: verifies custom authority and resource values for sovereign/custom clouds.
 
+### Runtime endpoint authentication state
+
+Class: `TestEndpointAuthMetadata`
+
+- `test_metadata_uses_runtime_state_file`: writes and reads endpoint metadata through the runtime JSON state path using an isolated temporary directory.
+- `test_metadata_rejects_different_client_id_for_same_endpoint`: raises `AuthMetadataConflict` when a second identity (different `client_id`) tries to claim an endpoint already owned by another identity, and leaves the original owner's metadata untouched.
+- `test_metadata_write_takes_exclusive_lock`: proves the state-file `flock` is exclusive by showing a second non-blocking lock attempt fails with `EWOULDBLOCK`/`EAGAIN` while a writer holds it.
+
 ### Native-library wrappers
 
 Classes: `TestAzfilesSetOauth`, `TestAzfilesClear`, and `TestAzfilesList`
 
 - `test_set_calls_lib`: passes the endpoint and OAuth token to the native setter.
 - `test_set_nonzero_rc_exits`: exits when the native setter returns an error.
+- `test_set_persists_metadata_after_successful_lib_call`: confirms auth metadata is only written after the native credential-set call succeeds.
+- `test_set_conflict_raised_before_lib_call`: confirms an identity conflict raises `AuthMetadataConflict` and the native setter is never called, so the krb5/keyring store is never touched for a rejected request.
+- `test_set_force_bypasses_conflict_and_overwrites_metadata`: confirms `force=True` skips the conflict check, still calls the native setter, and overwrites the endpoint's metadata with the new identity.
 - `test_clear_calls_lib`: calls the native credential-clear function.
 - `test_clear_nonzero_rc_exits`: exits when credential clearing fails.
+- `test_clear_removes_metadata`: confirms a successful clear also removes the endpoint's persisted auth metadata.
 - `test_list_plain`: requests plain credential output.
 - `test_list_json`: requests JSON credential output.
 - `test_list_nonzero_rc_exits`: propagates a nonzero list return code.
@@ -118,6 +130,10 @@ Class: `TestRefreshTicket`
 
 - `test_refresh_uses_system_mi_for_root_username`: uses system-assigned managed identity for a root mount.
 - `test_refresh_uses_user_mi_for_client_id_username`: uses the mount username as the user-assigned client ID.
+- `test_refresh_skips_if_metadata_client_id_differs_from_mount_user`: skips refresh (no token fetch, no credential write) when the persisted `client_id` does not match the current mount's username, preventing a stale/foreign identity from being refreshed onto the wrong endpoint.
+- `test_refresh_skips_workload_identity_metadata_when_present`: skips refresh entirely for endpoints persisted with workload-identity metadata, since workload-identity refresh is not currently supported.
+- `test_refresh_skips_token_auth_mode`: skips refresh entirely for endpoints persisted with `auth_mode="token"`, even when the mount's username would otherwise map to a managed identity, since a direct token has no credential source to refresh from.
+- `test_refresh_skips_when_identity_changes_during_token_fetch`: covers the race where an endpoint's identity is reassigned (e.g. via `set --force`) while the daemon's token fetch was in flight; `azfiles_set_oauth` re-validates the stale metadata under its own lock, raises `AuthMetadataConflict`, and `refresh_ticket` catches it as a skip instead of clobbering the new identity's credential.
 
 ### Epoch parsing
 
@@ -136,6 +152,8 @@ Class: `TestCLIArgParsing`
 - `test_list_command_calls_lib`: routes `list` to the native list wrapper.
 - `test_clear_command_calls_lib`: routes `clear` to the native clear wrapper.
 - `test_set_direct_token`: routes a direct OAuth token to the native setter.
+- `test_set_system_mi_conflict_exits_before_touching_krb5_cache`: end-to-end CLI check that `set ... --system` against an endpoint already owned by a different identity exits with code `3`, never calls the native credential setter, and leaves the original owner's metadata intact.
+- `test_set_system_mi_force_overwrites_conflicting_metadata`: end-to-end CLI check that `set ... --system --force` against an endpoint already owned by a different identity succeeds, calls the native credential setter, and overwrites the metadata to reflect the new identity.
 
 ### Ticket listing and daemon orchestration
 

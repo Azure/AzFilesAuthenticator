@@ -14,8 +14,10 @@ Exit code 0 = all passed, 1 = failures found.
 """
 
 import ast
+import contextlib
 import importlib
 import importlib.util
+import fcntl
 import json
 import os
 import re
@@ -141,6 +143,11 @@ def _load_refresh():
     fake_azfilesauth.get_endpoint_auth_metadata = mock.MagicMock(return_value=None)
     fake_azfilesauth.init_new_user = mock.MagicMock()
 
+    class _FakeAuthMetadataConflict(Exception):
+        pass
+
+    fake_azfilesauth.AuthMetadataConflict = _FakeAuthMetadataConflict
+
     pre_patch = {"azfilesauth": fake_azfilesauth}
 
     # Redirect logging to a temp file or NullHandler so tests don't need /var/log access
@@ -155,6 +162,21 @@ def _load_refresh():
         mod = _load_module_from_source("azfilesrefresh", refresh_path, pre_patch=pre_patch)
     mod._fake_azfilesauth = fake_azfilesauth
     return mod
+
+
+@contextlib.contextmanager
+def _temp_auth_state(mod):
+    """Point mod's AUTH_STATE_DIR/AUTH_STATE_FILE_PATH at a throwaway temp dir so
+    lock-holding code paths (azfiles_set_oauth/azfiles_clear/azfiles_list) don't
+    touch the real /run/azfilesauth in tests."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+        state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+        with mock.patch.dict(
+            mod.get_endpoint_auth_metadata.__globals__,
+            {"AUTH_STATE_DIR": state_dir, "AUTH_STATE_FILE_PATH": state_file},
+        ):
+            yield state_dir, state_file
 
 
 # ===================================================================
@@ -593,9 +615,10 @@ class TestEndpointAuthMetadata(unittest.TestCase):
                     "AUTH_STATE_FILE_PATH": state_file,
                 },
             ):
-                self.mod.set_endpoint_auth_metadata(
+                self.mod.azfiles_set_oauth(
                     "https://account.file.core.windows.net",
-                    "workload-identity",
+                    "seed-token",
+                    auth_mode="workload-identity",
                     tenant_id="tenant-1",
                     client_id="client-1",
                     token_file="/tmp/token",
@@ -607,6 +630,66 @@ class TestEndpointAuthMetadata(unittest.TestCase):
 
             self.assertEqual(metadata["auth_mode"], "workload-identity")
             self.assertTrue(os.path.exists(state_file))
+
+    def test_metadata_rejects_different_client_id_for_same_endpoint(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+            state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+            with mock.patch.dict(
+                self.mod.get_endpoint_auth_metadata.__globals__,
+                {
+                    "AUTH_STATE_DIR": state_dir,
+                    "AUTH_STATE_FILE_PATH": state_file,
+                },
+            ):
+                self.mod.azfiles_set_oauth(
+                    "https://account.file.core.windows.net",
+                    "tok-alice",
+                    auth_mode="user-assigned",
+                    client_id="alice-client-id",
+                )
+                with self.assertRaises(self.mod.AuthMetadataConflict):
+                    self.mod.azfiles_set_oauth(
+                        "https://account.file.core.windows.net",
+                        "tok-bob",
+                        auth_mode="user-assigned",
+                        client_id="bob-client-id",
+                    )
+                metadata = self.mod.get_endpoint_auth_metadata(
+                    "https://account.file.core.windows.net"
+                )
+
+            self.assertEqual(metadata["client_id"], "alice-client-id")
+            self.assertEqual(metadata["auth_mode"], "user-assigned")
+
+    def test_metadata_write_takes_exclusive_lock(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+            state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+            with mock.patch.dict(
+                self.mod.get_endpoint_auth_metadata.__globals__,
+                {
+                    "AUTH_STATE_DIR": state_dir,
+                    "AUTH_STATE_FILE_PATH": state_file,
+                },
+            ):
+                self.mod.azfiles_set_oauth(
+                    "https://account.file.core.windows.net",
+                    "seed-token",
+                    auth_mode="system",
+                )
+
+                # A second exclusive lock attempt on the same file must block
+                # (non-blocking probe should fail with EWOULDBLOCK/EAGAIN)
+                # while the first holder is still writing.
+                with self.mod._locked_state_file(exclusive=True) as held_file:
+                    probe_fd = os.open(state_file, os.O_RDWR)
+                    try:
+                        with self.assertRaises(OSError):
+                            fcntl.flock(probe_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    finally:
+                        os.close(probe_fd)
+
 
 
 # ===================================================================
@@ -620,7 +703,8 @@ class TestAzfilesSetOauth(unittest.TestCase):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
 
-        mod.azfiles_set_oauth("https://myaccount.file.core.windows.net", "tok-123")
+        with _temp_auth_state(mod):
+            mod.azfiles_set_oauth("https://myaccount.file.core.windows.net", "tok-123")
 
         fake_lib.extern_smb_set_credential_oauth_token.assert_called_once()
         args = fake_lib.extern_smb_set_credential_oauth_token.call_args[0]
@@ -632,8 +716,74 @@ class TestAzfilesSetOauth(unittest.TestCase):
         fake_lib.extern_smb_set_credential_oauth_token.return_value = -1
         mod = _load_manager(fake_lib)
 
-        with self.assertRaises(SystemExit):
-            mod.azfiles_set_oauth("https://myaccount.file.core.windows.net", "tok-123")
+        with _temp_auth_state(mod):
+            with self.assertRaises(SystemExit):
+                mod.azfiles_set_oauth("https://myaccount.file.core.windows.net", "tok-123")
+
+    def test_set_persists_metadata_after_successful_lib_call(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with _temp_auth_state(mod):
+            mod.azfiles_set_oauth(
+                "https://myaccount.file.core.windows.net",
+                "tok-123",
+                auth_mode="system",
+            )
+            metadata = mod.get_endpoint_auth_metadata("https://myaccount.file.core.windows.net")
+
+        self.assertEqual(metadata["auth_mode"], "system")
+
+    def test_set_conflict_raised_before_lib_call(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with _temp_auth_state(mod):
+            mod.azfiles_set_oauth(
+                "https://myaccount.file.core.windows.net",
+                "tok-1",
+                auth_mode="user-assigned",
+                client_id="alice-client-id",
+            )
+            fake_lib.extern_smb_set_credential_oauth_token.reset_mock()
+
+            with self.assertRaises(mod.AuthMetadataConflict):
+                mod.azfiles_set_oauth(
+                    "https://myaccount.file.core.windows.net",
+                    "tok-2",
+                    auth_mode="user-assigned",
+                    client_id="bob-client-id",
+                )
+
+        fake_lib.extern_smb_set_credential_oauth_token.assert_not_called()
+
+    def test_set_force_bypasses_conflict_and_overwrites_metadata(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with _temp_auth_state(mod):
+            mod.azfiles_set_oauth(
+                "https://myaccount.file.core.windows.net",
+                "tok-1",
+                auth_mode="user-assigned",
+                client_id="alice-client-id",
+            )
+            fake_lib.extern_smb_set_credential_oauth_token.reset_mock()
+
+            mod.azfiles_set_oauth(
+                "https://myaccount.file.core.windows.net",
+                "tok-2",
+                auth_mode="user-assigned",
+                client_id="bob-client-id",
+                force=True,
+            )
+
+            metadata = mod.get_endpoint_auth_metadata("https://myaccount.file.core.windows.net")
+
+        fake_lib.extern_smb_set_credential_oauth_token.assert_called_once()
+        args = fake_lib.extern_smb_set_credential_oauth_token.call_args[0]
+        self.assertEqual(args[1], b"tok-2")
+        self.assertEqual(metadata["client_id"], "bob-client-id")
 
 
 class TestAzfilesClear(unittest.TestCase):
@@ -642,7 +792,8 @@ class TestAzfilesClear(unittest.TestCase):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
 
-        mod.azfiles_clear("https://myaccount.file.core.windows.net")
+        with _temp_auth_state(mod):
+            mod.azfiles_clear("https://myaccount.file.core.windows.net")
 
         fake_lib.extern_smb_clear_credential.assert_called_once()
 
@@ -651,8 +802,24 @@ class TestAzfilesClear(unittest.TestCase):
         fake_lib.extern_smb_clear_credential.return_value = -1
         mod = _load_manager(fake_lib)
 
-        with self.assertRaises(SystemExit):
+        with _temp_auth_state(mod):
+            with self.assertRaises(SystemExit):
+                mod.azfiles_clear("https://myaccount.file.core.windows.net")
+
+    def test_clear_removes_metadata(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with _temp_auth_state(mod):
+            mod.azfiles_set_oauth(
+                "https://myaccount.file.core.windows.net",
+                "tok-123",
+                auth_mode="system",
+            )
             mod.azfiles_clear("https://myaccount.file.core.windows.net")
+            metadata = mod.get_endpoint_auth_metadata("https://myaccount.file.core.windows.net")
+
+        self.assertIsNone(metadata)
 
 
 class TestAzfilesList(unittest.TestCase):
@@ -660,13 +827,15 @@ class TestAzfilesList(unittest.TestCase):
     def test_list_plain(self):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
-        mod.azfiles_list(False)
+        with _temp_auth_state(mod):
+            mod.azfiles_list(False)
         fake_lib.extern_smb_list_credential.assert_called_once_with(False)
 
     def test_list_json(self):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
-        mod.azfiles_list(True)
+        with _temp_auth_state(mod):
+            mod.azfiles_list(True)
         fake_lib.extern_smb_list_credential.assert_called_once_with(True)
 
     def test_list_nonzero_rc_exits(self):
@@ -674,9 +843,11 @@ class TestAzfilesList(unittest.TestCase):
         fake_lib.extern_smb_list_credential.return_value = 2
         mod = _load_manager(fake_lib)
 
-        with self.assertRaises(SystemExit) as ctx:
-            mod.azfiles_list(False)
+        with _temp_auth_state(mod):
+            with self.assertRaises(SystemExit) as ctx:
+                mod.azfiles_list(False)
         self.assertEqual(ctx.exception.code, 2)
+
 
 
 # ===================================================================
@@ -870,7 +1041,7 @@ class TestRefreshTicket(unittest.TestCase):
         # Should call get_oauth_token with no args (system MI)
         self.mod._fake_azfilesauth.get_oauth_token.assert_called_once_with()
         self.mod._fake_azfilesauth.azfiles_set_oauth.assert_called_once_with(
-            "https://account.file.core.windows.net", "system-token"
+            "https://account.file.core.windows.net", "system-token", auth_mode="system"
         )
 
     @mock.patch("subprocess.run")
@@ -895,7 +1066,31 @@ class TestRefreshTicket(unittest.TestCase):
         self.mod._fake_azfilesauth.get_oauth_token.assert_called_once_with("my-client-id")
 
     @mock.patch("subprocess.run")
-    def test_refresh_uses_workload_identity_metadata_when_present(self, mock_run):
+    def test_refresh_skips_if_metadata_client_id_differs_from_mount_user(self, mock_run):
+        mount_output = (
+            "//account.file.core.windows.net/share on /mnt type cifs "
+            "(rw,sec=krb5,username=other-client-id,uid=0)\n"
+        )
+        mock_run.return_value = mock.MagicMock(
+            stdout=mount_output.encode("utf-8"),
+            stderr=b"",
+        )
+
+        self.mod._fake_azfilesauth.get_endpoint_auth_metadata.return_value = {
+            "auth_mode": "user-assigned",
+            "client_id": "saved-client-id",
+        }
+        self.mod._fake_azfilesauth.get_oauth_token.reset_mock()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.reset_mock()
+
+        ticket = {"server": "cifs/account.file.core.windows.net@REALM"}
+        self.mod.refresh_ticket(ticket)
+
+        self.mod._fake_azfilesauth.get_oauth_token.assert_not_called()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_not_called()
+
+    @mock.patch("subprocess.run")
+    def test_refresh_skips_workload_identity_metadata_when_present(self, mock_run):
         mount_output = (
             "//account.file.core.windows.net/share on /mnt type cifs "
             "(rw,sec=krb5,username=workload-client-id,uid=0)\n"
@@ -914,25 +1109,68 @@ class TestRefreshTicket(unittest.TestCase):
             "resource": "https://storage.azure.com",
         }
         self.mod._fake_azfilesauth.get_oauth_token.reset_mock()
-        self.mod._fake_azfilesauth.get_workload_identity_token.return_value = "workload-token"
         self.mod._fake_azfilesauth.get_workload_identity_token.reset_mock()
-        self.mod._fake_azfilesauth.get_workload_identity_token.return_value = "workload-token"
         self.mod._fake_azfilesauth.azfiles_set_oauth.reset_mock()
 
         ticket = {"server": "cifs/account.file.core.windows.net@REALM"}
         self.mod.refresh_ticket(ticket)
 
-        self.mod._fake_azfilesauth.get_workload_identity_token.assert_called_once_with(
-            "tenant-1",
-            "workload-client-id",
-            "/tmp/token",
-            authority_host="https://login.microsoftonline.com",
-            resource="https://storage.azure.com",
+        self.mod._fake_azfilesauth.get_workload_identity_token.assert_not_called()
+        self.mod._fake_azfilesauth.get_oauth_token.assert_not_called()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_not_called()
+
+    @mock.patch("subprocess.run")
+    def test_refresh_skips_token_auth_mode(self, mock_run):
+        mount_output = (
+            "//account.file.core.windows.net/share on /mnt type cifs "
+            "(rw,sec=krb5,username=root,uid=0)\n"
         )
-        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_called_once_with(
-            "https://account.file.core.windows.net", "workload-token"
+        mock_run.return_value = mock.MagicMock(
+            stdout=mount_output.encode("utf-8"),
+            stderr=b"",
         )
 
+        self.mod._fake_azfilesauth.get_endpoint_auth_metadata.return_value = {
+            "auth_mode": "token",
+        }
+        self.mod._fake_azfilesauth.get_oauth_token.reset_mock()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.reset_mock()
+
+        ticket = {"server": "cifs/account.file.core.windows.net@REALM"}
+        self.mod.refresh_ticket(ticket)
+
+        self.mod._fake_azfilesauth.get_oauth_token.assert_not_called()
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_not_called()
+
+    @mock.patch("subprocess.run")
+    def test_refresh_skips_when_identity_changes_during_token_fetch(self, mock_run):
+        mount_output = (
+            "//account.file.core.windows.net/share on /mnt type cifs "
+            "(rw,sec=krb5,username=root,uid=0)\n"
+        )
+        mock_run.return_value = mock.MagicMock(
+            stdout=mount_output.encode("utf-8"),
+            stderr=b"",
+        )
+
+        self.mod._fake_azfilesauth.get_endpoint_auth_metadata.return_value = {
+            "auth_mode": "system",
+        }
+        self.mod._fake_azfilesauth.get_oauth_token.return_value = "system-token"
+        # Simulate another process re-assigning this endpoint's identity while
+        # the (possibly slow) token fetch above was in flight: azfiles_set_oauth
+        # re-checks metadata under its own lock and raises on the stale caller.
+        self.mod._fake_azfilesauth.azfiles_set_oauth.side_effect = self.mod._fake_azfilesauth.AuthMetadataConflict(
+            "Endpoint https://account.file.core.windows.net: existing auth_mode='user-assigned' does not match requested auth_mode='system'"
+        )
+
+        ticket = {"server": "cifs/account.file.core.windows.net@REALM"}
+        # Should not raise: the conflict must be caught and treated as a skip.
+        self.mod.refresh_ticket(ticket)
+
+        self.mod._fake_azfilesauth.azfiles_set_oauth.assert_called_once_with(
+            "https://account.file.core.windows.net", "system-token", auth_mode="system"
+        )
 
 # ===================================================================
 # Test: azfilesrefresh.py.in — epoch parsing
@@ -983,16 +1221,17 @@ class TestCLIArgParsing(unittest.TestCase):
                 return mock.mock_open(read_data=config_data)()
             return real_open(path, *a, **kw)
 
-        with mock.patch("builtins.open", side_effect=_mock_open_fn):
-            with mock.patch("os.system", return_value=0):
-                with mock.patch("subprocess.check_output", return_value=b"1000"):
-                    with mock.patch("pwd.getpwuid", return_value=mock.MagicMock()):
-                        saved_argv = sys.argv
-                        try:
-                            sys.argv = argv
-                            mod.run_azfilesauthmanager()
-                        finally:
-                            sys.argv = saved_argv
+        with _temp_auth_state(mod):
+            with mock.patch("builtins.open", side_effect=_mock_open_fn):
+                with mock.patch("os.system", return_value=0):
+                    with mock.patch("subprocess.check_output", return_value=b"1000"):
+                        with mock.patch("pwd.getpwuid", return_value=mock.MagicMock()):
+                            saved_argv = sys.argv
+                            try:
+                                sys.argv = argv
+                                mod.run_azfilesauthmanager()
+                            finally:
+                                sys.argv = saved_argv
         return fake_lib
 
     def test_no_args_prints_usage_and_exits(self):
@@ -1025,6 +1264,123 @@ class TestCLIArgParsing(unittest.TestCase):
         args = fake_lib.extern_smb_set_credential_oauth_token.call_args[0]
         self.assertEqual(args[0], b"https://account.file.core.windows.net")
         self.assertEqual(args[1], b"my-direct-token")
+
+    def test_set_system_mi_conflict_exits_before_touching_krb5_cache(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+            state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+
+            with mock.patch.dict(
+                mod.get_endpoint_auth_metadata.__globals__,
+                {
+                    "AUTH_STATE_DIR": state_dir,
+                    "AUTH_STATE_FILE_PATH": state_file,
+                },
+            ):
+                # Endpoint is already owned by a user-assigned identity.
+                mod.azfiles_set_oauth(
+                    "https://account.file.core.windows.net",
+                    "seed-token",
+                    auth_mode="user-assigned",
+                    client_id="alice-client-id",
+                )
+                fake_lib.extern_smb_set_credential_oauth_token.reset_mock()
+
+                token_response = mock.MagicMock()
+                token_response.token = "sys-tok"
+                credential = mock.MagicMock()
+                credential.get_token.return_value = token_response
+
+                config_data = "KRB5_CC_NAME: /tmp/krb5cc_test\nUSER_UID: 1000\n"
+                real_open = open
+                def _mock_open_fn(path, *a, **kw):
+                    if isinstance(path, str) and path == "/etc/azfilesauth/config.yaml":
+                        return mock.mock_open(read_data=config_data)()
+                    return real_open(path, *a, **kw)
+
+                with mock.patch("builtins.open", side_effect=_mock_open_fn):
+                    with mock.patch("os.system", return_value=0):
+                        with mock.patch("subprocess.check_output", return_value=b"1000"):
+                            with mock.patch("pwd.getpwuid", return_value=mock.MagicMock()):
+                                with mock.patch.dict(
+                                    mod.get_oauth_token.__globals__,
+                                    {"ManagedIdentityCredential": mock.MagicMock(return_value=credential)},
+                                ):
+                                    saved_argv = sys.argv
+                                    try:
+                                        sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system"]
+                                        with self.assertRaises(SystemExit) as ctx:
+                                            mod.run_azfilesauthmanager()
+                                    finally:
+                                        sys.argv = saved_argv
+
+                self.assertEqual(ctx.exception.code, 3)
+                fake_lib.extern_smb_set_credential_oauth_token.assert_not_called()
+
+                # Original owner's metadata must remain untouched.
+                metadata = mod.get_endpoint_auth_metadata("https://account.file.core.windows.net")
+                self.assertEqual(metadata["client_id"], "alice-client-id")
+
+    def test_set_system_mi_force_overwrites_conflicting_metadata(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+            state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+
+            with mock.patch.dict(
+                mod.get_endpoint_auth_metadata.__globals__,
+                {
+                    "AUTH_STATE_DIR": state_dir,
+                    "AUTH_STATE_FILE_PATH": state_file,
+                },
+            ):
+                # Endpoint is already owned by a user-assigned identity.
+                mod.azfiles_set_oauth(
+                    "https://account.file.core.windows.net",
+                    "seed-token",
+                    auth_mode="user-assigned",
+                    client_id="alice-client-id",
+                )
+                fake_lib.extern_smb_set_credential_oauth_token.reset_mock()
+
+                token_response = mock.MagicMock()
+                token_response.token = "sys-tok"
+                credential = mock.MagicMock()
+                credential.get_token.return_value = token_response
+
+                config_data = "KRB5_CC_NAME: /tmp/krb5cc_test\nUSER_UID: 1000\n"
+                real_open = open
+                def _mock_open_fn(path, *a, **kw):
+                    if isinstance(path, str) and path == "/etc/azfilesauth/config.yaml":
+                        return mock.mock_open(read_data=config_data)()
+                    return real_open(path, *a, **kw)
+
+                with mock.patch("builtins.open", side_effect=_mock_open_fn):
+                    with mock.patch("os.system", return_value=0):
+                        with mock.patch("subprocess.check_output", return_value=b"1000"):
+                            with mock.patch("pwd.getpwuid", return_value=mock.MagicMock()):
+                                with mock.patch.dict(
+                                    mod.get_oauth_token.__globals__,
+                                    {"ManagedIdentityCredential": mock.MagicMock(return_value=credential)},
+                                ):
+                                    saved_argv = sys.argv
+                                    try:
+                                        sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--force"]
+                                        mod.run_azfilesauthmanager()
+                                    finally:
+                                        sys.argv = saved_argv
+
+                fake_lib.extern_smb_set_credential_oauth_token.assert_called_once()
+
+                # Metadata now reflects the forced overwrite, not the original owner.
+                metadata = mod.get_endpoint_auth_metadata("https://account.file.core.windows.net")
+                self.assertEqual(metadata["auth_mode"], "system")
+                self.assertNotIn("client_id", metadata)
 
 
 # ===================================================================
