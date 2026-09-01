@@ -3,7 +3,8 @@ FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
 COPY *.rpm /tmp/
 
-RUN tdnf -y install python3 python3-requests curl krb5-libs shadow-utils && \
+RUN tdnf -y update && \
+    tdnf -y install python3 curl krb5-libs shadow-utils && \
     rpm -ivh /tmp/azfilesauth-*.x86_64.rpm && \
     tdnf clean all
 

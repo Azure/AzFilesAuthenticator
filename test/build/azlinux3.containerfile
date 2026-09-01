@@ -1,7 +1,8 @@
 # Build azfilesauth RPM on Azure Linux 3
 FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
-RUN tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
+RUN tdnf -y update && \
+    tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
         python3-devel libcurl-devel krb5-devel chrpath git automake \
         binutils glibc-devel kernel-headers && \
     tdnf clean all

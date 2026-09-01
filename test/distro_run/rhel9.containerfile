@@ -3,7 +3,8 @@ FROM registry.access.redhat.com/ubi9/ubi:latest
 
 COPY *.rpm /tmp/
 
-RUN dnf -y install --allowerasing python3 python3-requests curl krb5-libs && \
+RUN dnf -y update && \
+    dnf -y install --allowerasing python3 curl krb5-libs && \
     rpm -ivh /tmp/azfilesauth-*.x86_64.rpm && \
     dnf clean all
 

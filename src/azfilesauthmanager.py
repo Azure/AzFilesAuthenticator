@@ -5,7 +5,10 @@ import sys
 import subprocess
 import time
 import ctypes
-import requests
+import json
+import urllib.request
+import urllib.parse
+import urllib.error
 import pwd
 
 
@@ -112,9 +115,9 @@ def get_oauth_token(client_id=None):
     headers = {"Metadata": "true"}
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
         tok = data.get("access_token")
         if not tok:
             print("Access token missing in IMDS response")
@@ -155,9 +158,10 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
     }
 
     try:
-        response = requests.post(url, headers=headers, data=data, timeout=10)
-        response.raise_for_status()
-        return response.json().get("access_token")
+        body = urllib.parse.urlencode(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8")).get("access_token")
     except Exception as e:
         print(f"Error fetching Workload Identity token: {e}")
         return None
