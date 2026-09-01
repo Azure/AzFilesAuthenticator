@@ -5,6 +5,7 @@ import sys
 import subprocess
 import time
 import ctypes
+import ipaddress
 import requests
 import pwd
 
@@ -14,7 +15,7 @@ CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
     azfilesauthmanager set <file_endpoint_uri> <oauth_token>
-    azfilesauthmanager set <file_endpoint_uri> --system
+    azfilesauthmanager set <file_endpoint_uri> --system [--identity-endpoint <endpoint>]
     azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
     azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file> [--authority-host <authority_host>] [--resource <resource>]
     azfilesauthmanager clear <file_endpoint_uri>
@@ -102,7 +103,146 @@ def init_new_user():
     return new_user_uid
 
 
-def get_oauth_token(client_id=None):
+def _is_loopback_endpoint(endpoint):
+    """Validate that the endpoint URL resolves to a loopback address."""
+    try:
+        from urllib.parse import urlparse
+        import socket
+        parsed = urlparse(endpoint)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Resolve hostname and check if all addresses are loopback.
+        # Use ipaddress.is_loopback so we correctly accept any IPv4 127.0.0.0/8
+        # address and any form of IPv6 loopback (``::1`` and its expanded
+        # ``0:0:0:0:0:0:0:1`` form), not just literal string matches.
+        addrs = socket.getaddrinfo(hostname, None)
+        for addr_info in addrs:
+            ip = addr_info[4][0]
+            # Strip an IPv6 scope id (e.g. ``fe80::1%eth0``) before parsing.
+            ip_no_scope = ip.split("%", 1)[0]
+            try:
+                if not ipaddress.ip_address(ip_no_scope).is_loopback:
+                    return False
+            except ValueError:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def is_arc_environment(identity_endpoint=None):
+    # Azure Arc-enabled servers expose the Hybrid Instance Metadata Service
+    # (HIMDS) endpoint via the --identity-endpoint parameter or the
+    # IDENTITY_ENDPOINT environment variable, e.g.
+    # http://127.0.0.1:40342/metadata/identity/oauth2/token.
+    #
+    # An explicit --identity-endpoint argument is always treated as an Arc
+    # request (so a misconfigured value surfaces as a clear error rather than
+    # silently falling back to VM IMDS). For the environment-variable case we
+    # additionally require the endpoint to look like local HIMDS (i.e.
+    # loopback-resolving), so unrelated services that also set
+    # IDENTITY_ENDPOINT don't accidentally route us away from VM IMDS.
+    if identity_endpoint:
+        return True
+    env_endpoint = os.environ.get("IDENTITY_ENDPOINT")
+    if env_endpoint and _is_loopback_endpoint(env_endpoint):
+        return True
+    return False
+
+
+def get_arc_oauth_token(identity_endpoint=None):
+    # Azure Arc HIMDS uses a challenge-response flow:
+    #   1) GET the token endpoint; the first response is HTTP 401 with a
+    #      WWW-Authenticate header pointing to a short-lived challenge file
+    #      (e.g. "Basic realm=/var/opt/azcmagent/tokens/<guid>.key").
+    #   2) Read the challenge file (root-owned, group readable by himds) and
+    #      replay the GET with "Authorization: Basic <file-contents>".
+    # Arc only supports system-assigned managed identity, so no client_id is
+    # accepted here.
+    endpoint = identity_endpoint or os.environ.get("IDENTITY_ENDPOINT")
+    if not endpoint:
+        print("IDENTITY_ENDPOINT is not set; cannot use Azure Arc managed identity")
+        return None
+
+    # Security: Arc HIMDS should only be on loopback. Reject non-local endpoints
+    # to prevent accidentally sending challenge secrets to remote addresses.
+    # _is_loopback_endpoint() also returns False for malformed/empty URLs, so the
+    # message covers both invalid and non-loopback endpoints. Use !r so that
+    # whitespace-only / empty values are obvious in the output.
+    if not _is_loopback_endpoint(endpoint):
+        print(f"Refusing to use invalid or non-loopback identity endpoint: {endpoint!r}")
+        return None
+
+    params = {
+        "api-version": "2020-06-01",
+        "resource": "https://storage.azure.com",
+    }
+    headers = {"Metadata": "true"}
+
+    try:
+        challenge_resp = requests.get(endpoint, headers=headers, params=params, timeout=10)
+    except Exception as e:
+        print(f"Error contacting Azure Arc HIMDS endpoint {endpoint}: {e}")
+        return None
+
+    if challenge_resp.status_code != 401:
+        print(f"Unexpected response from Azure Arc HIMDS (expected 401, got {challenge_resp.status_code}): {challenge_resp.text}")
+        return None
+
+    www_auth = challenge_resp.headers.get("WWW-Authenticate", "")
+    # Expected format: 'Basic realm=<path-to-challenge-file>'
+    marker = "realm="
+    if marker not in www_auth:
+        print(f"Azure Arc HIMDS did not return a challenge file path (WWW-Authenticate: {www_auth!r})")
+        return None
+    realm_value = www_auth.split(marker, 1)[1].strip().strip('"')
+    # Strip trailing parameters (e.g. ', charset="UTF-8"') after the realm value
+    if ',' in realm_value:
+        realm_value = realm_value.split(',', 1)[0].strip().strip('"')
+    challenge_path = realm_value
+
+    # Guard against path traversal: only accept paths under /var/opt/azcmagent/tokens.
+    expected_dir = "/var/opt/azcmagent/tokens/"
+    resolved_challenge_path = os.path.realpath(challenge_path)
+    if not resolved_challenge_path.startswith(expected_dir):
+        print(f"Refusing to read Arc challenge file outside {expected_dir}: {challenge_path}")
+        return None
+
+    try:
+        with open(resolved_challenge_path, "r") as f:
+            secret = f.read().strip()
+    except Exception as e:
+        print(f"Error reading Azure Arc challenge file {challenge_path}: {e}")
+        return None
+
+    auth_headers = dict(headers)
+    auth_headers["Authorization"] = f"Basic {secret}"
+
+    try:
+        response = requests.get(endpoint, headers=auth_headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        tok = data.get("access_token")
+        if not tok:
+            print("Access token missing in Azure Arc HIMDS response")
+            return None
+        return tok
+    except Exception as e:
+        print(f"Error fetching Azure Arc system-assigned managed identity token: {e}")
+        return None
+
+
+def get_oauth_token(client_id=None, identity_endpoint=None):
+    # On Azure Arc-enabled servers, transparently route to HIMDS. Arc only
+    # supports system-assigned managed identity, so user-assigned (client_id)
+    # is rejected with a clear error.
+    if is_arc_environment(identity_endpoint):
+        if client_id:
+            print("Azure Arc-enabled servers only support system-assigned managed identity; --imds-client-id is not supported on Arc.")
+            return None
+        return get_arc_oauth_token(identity_endpoint)
+
     # IMDS: system-assigned (no client_id) or user-assigned (with client_id)
     base = "http://169.254.169.254/metadata/identity/oauth2/token"
     params = ["api-version=2018-02-01", "resource=https://storage.azure.com"]
@@ -289,10 +429,29 @@ def run_azfilesauthmanager():
                 sys.exit(1)
         # System-assigned MI path
         elif is_system_mi:
-            if len(argv) != 4:  # set <endpoint> --system
-                print(USAGE_MESSAGE)
-                sys.exit(1)
-            oauth_token = get_oauth_token()
+            identity_endpoint = None
+            # Parse known optional flags; reject unknown arguments.
+            # argv layout: [prog, 'set', <endpoint>, '--system', ...optional...]
+            # Filter out the '--system' flag itself so it isn't treated as unknown.
+            remaining = [a for a in argv[3:] if a != "--system"]
+            i = 0
+            while i < len(remaining):
+                if remaining[i] == "--identity-endpoint":
+                    if (
+                        i + 1 >= len(remaining)
+                        or remaining[i + 1].startswith("--")
+                        or remaining[i + 1].strip() == ""
+                    ):
+                        print("Error: --identity-endpoint requires a non-empty value")
+                        print(USAGE_MESSAGE)
+                        sys.exit(1)
+                    identity_endpoint = remaining[i + 1]
+                    i += 2
+                else:
+                    print(f"Error: unknown argument '{remaining[i]}'")
+                    print(USAGE_MESSAGE)
+                    sys.exit(1)
+            oauth_token = get_oauth_token(identity_endpoint=identity_endpoint)
             if oauth_token is None:
                 sys.exit(1)
         # Workload Identity path

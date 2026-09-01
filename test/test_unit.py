@@ -745,6 +745,248 @@ class TestStartDaemon(unittest.TestCase):
 
 
 # ===================================================================
+# Test: Azure Arc managed identity support
+# ===================================================================
+
+class TestIsLoopbackEndpoint(unittest.TestCase):
+    """Test _is_loopback_endpoint() validation."""
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_localhost_ip(self):
+        self.assertTrue(self.mod._is_loopback_endpoint("http://127.0.0.1:40342/metadata/identity/oauth2/token"))
+
+    def test_localhost_hostname(self):
+        self.assertTrue(self.mod._is_loopback_endpoint("http://localhost:40342/metadata/identity/oauth2/token"))
+
+    def test_non_loopback_rejected(self):
+        self.assertFalse(self.mod._is_loopback_endpoint("http://10.0.0.1:40342/metadata/identity/oauth2/token"))
+
+    def test_empty_url(self):
+        self.assertFalse(self.mod._is_loopback_endpoint(""))
+
+    def test_invalid_url(self):
+        self.assertFalse(self.mod._is_loopback_endpoint("not-a-url"))
+
+    def test_ipv6_loopback_shorthand(self):
+        """IPv6 loopback ``::1`` should be accepted."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("::1", 40342, 0, 0))]):
+            self.assertTrue(
+                self.mod._is_loopback_endpoint("http://[::1]:40342/metadata/identity/oauth2/token")
+            )
+
+    def test_ipv6_loopback_expanded(self):
+        """IPv6 loopback in expanded form ``0:0:0:0:0:0:0:1`` should be accepted."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("0:0:0:0:0:0:0:1", 40342, 0, 0))]):
+            self.assertTrue(
+                self.mod._is_loopback_endpoint("http://[0:0:0:0:0:0:0:1]:40342/metadata/identity/oauth2/token")
+            )
+
+    def test_ipv4_loopback_range(self):
+        """Any address in 127.0.0.0/8 should be accepted (e.g. 127.1.2.3)."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("127.1.2.3", 40342))]):
+            self.assertTrue(
+                self.mod._is_loopback_endpoint("http://127.1.2.3:40342/metadata/identity/oauth2/token")
+            )
+
+    def test_ipv6_non_loopback_rejected(self):
+        """Non-loopback IPv6 addresses should be rejected."""
+        with mock.patch("socket.getaddrinfo",
+                        return_value=[(0, 0, 0, "", ("2001:db8::1", 40342, 0, 0))]):
+            self.assertFalse(
+                self.mod._is_loopback_endpoint("http://[2001:db8::1]:40342/metadata/identity/oauth2/token")
+            )
+
+
+class TestIsArcEnvironment(unittest.TestCase):
+    """Test is_arc_environment() detection."""
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_explicit_endpoint(self):
+        self.assertTrue(self.mod.is_arc_environment("http://127.0.0.1:40342/token"))
+
+    def test_env_var(self):
+        with mock.patch.dict(os.environ, {"IDENTITY_ENDPOINT": "http://127.0.0.1:40342/token"}):
+            self.assertTrue(self.mod.is_arc_environment())
+
+    def test_no_endpoint(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(self.mod.is_arc_environment())
+
+    def test_env_var_non_loopback_ignored(self):
+        """Non-loopback IDENTITY_ENDPOINT env var should NOT be treated as Arc."""
+        with mock.patch.dict(os.environ, {"IDENTITY_ENDPOINT": "http://example.com/token"}):
+            with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=False):
+                self.assertFalse(self.mod.is_arc_environment())
+
+    def test_explicit_endpoint_non_loopback_still_arc(self):
+        """Explicit --identity-endpoint is always treated as Arc, even if not loopback,
+        so that a misconfigured value surfaces as a clear error later."""
+        self.assertTrue(self.mod.is_arc_environment("http://example.com/token"))
+
+
+class TestGetArcOauthToken(unittest.TestCase):
+    """Test get_arc_oauth_token() challenge-response flow."""
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_successful_token_fetch(self):
+        """Full happy path: 401 challenge → read file → get token."""
+        challenge_resp = mock.MagicMock(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic realm=/var/opt/azcmagent/tokens/test.key"},
+        )
+        token_resp = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "arc-token-123"},
+        )
+        token_resp.raise_for_status = mock.MagicMock()
+
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock.MagicMock(side_effect=[challenge_resp, token_resp])
+
+        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=True), \
+             mock.patch("os.path.realpath", return_value="/var/opt/azcmagent/tokens/test.key"), \
+             mock.patch("builtins.open", mock.mock_open(read_data="secret-key-data")):
+            token = self.mod.get_arc_oauth_token("http://127.0.0.1:40342/token")
+
+        self.assertEqual(token, "arc-token-123")
+
+    def test_non_loopback_rejected(self):
+        """Non-loopback endpoint should be rejected."""
+        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=False):
+            token = self.mod.get_arc_oauth_token("http://evil.com:40342/token")
+        self.assertIsNone(token)
+
+    def test_non_401_response(self):
+        """Non-401 initial response should fail."""
+        resp = mock.MagicMock(status_code=200, text="unexpected")
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock.MagicMock(return_value=resp)
+
+        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=True):
+            token = self.mod.get_arc_oauth_token("http://127.0.0.1:40342/token")
+        self.assertIsNone(token)
+
+    def test_path_traversal_rejected(self):
+        """Challenge path outside /var/opt/azcmagent/tokens/ is rejected."""
+        challenge_resp = mock.MagicMock(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic realm=/etc/shadow"},
+        )
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock.MagicMock(return_value=challenge_resp)
+
+        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=True), \
+             mock.patch("os.path.realpath", return_value="/etc/shadow"):
+            token = self.mod.get_arc_oauth_token("http://127.0.0.1:40342/token")
+        self.assertIsNone(token)
+
+    def test_www_authenticate_with_extra_params(self):
+        """WWW-Authenticate with trailing params (charset, etc.) should still parse."""
+        challenge_resp = mock.MagicMock(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm=/var/opt/azcmagent/tokens/key.key, charset="UTF-8"'},
+        )
+        token_resp = mock.MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "arc-token-456"},
+        )
+        token_resp.raise_for_status = mock.MagicMock()
+
+        self.mod.requests = mock.MagicMock()
+        self.mod.requests.get = mock.MagicMock(side_effect=[challenge_resp, token_resp])
+
+        with mock.patch.object(self.mod, "_is_loopback_endpoint", return_value=True), \
+             mock.patch("os.path.realpath", return_value="/var/opt/azcmagent/tokens/key.key"), \
+             mock.patch("builtins.open", mock.mock_open(read_data="secret")):
+            token = self.mod.get_arc_oauth_token("http://127.0.0.1:40342/token")
+
+        self.assertEqual(token, "arc-token-456")
+
+    def test_client_id_rejected_on_arc(self):
+        """get_oauth_token with client_id on Arc should return None."""
+        with mock.patch.object(self.mod, "is_arc_environment", return_value=True):
+            token = self.mod.get_oauth_token(client_id="some-client-id", identity_endpoint="http://127.0.0.1:40342/token")
+        self.assertIsNone(token)
+
+
+class TestSystemMIArgParsing(unittest.TestCase):
+    """Test --system path argument validation."""
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_unknown_arg_rejected(self):
+        """Unknown arguments in --system path should cause exit."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--bogus"]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+    def test_identity_endpoint_missing_value(self):
+        """--identity-endpoint without a value should cause exit."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint"]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+    def test_identity_endpoint_consumes_flag_as_value(self):
+        """--identity-endpoint followed by another flag should be rejected."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", "--foo"]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+    def test_identity_endpoint_empty_value_rejected(self):
+        """--identity-endpoint with an empty-string value should be rejected."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", ""]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+    def test_identity_endpoint_whitespace_value_rejected(self):
+        """--identity-endpoint with a whitespace-only value should be rejected."""
+        with self.assertRaises(SystemExit):
+            saved = sys.argv
+            try:
+                sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "--system", "--identity-endpoint", "   "]
+                with mock.patch.object(self.mod, "get_oauth_token", return_value="tok"), \
+                     mock.patch.object(self.mod, "azfiles_set_oauth"):
+                    self.mod.run_azfilesauthmanager()
+            finally:
+                sys.argv = saved
+
+
+
+# ===================================================================
 # Main
 # ===================================================================
 
