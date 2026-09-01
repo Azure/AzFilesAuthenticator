@@ -7,6 +7,8 @@ import time
 import ctypes
 import pwd
 import json
+import fcntl
+import contextlib
 try:
     import yaml
     YAML_IMPORT_ERROR = None
@@ -32,9 +34,9 @@ AUTH_STATE_FILE_PATH = f"{AUTH_STATE_DIR}/endpoint-auth-state.json"
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
     azfilesauthmanager set <file_endpoint_uri> <oauth_token>
-    azfilesauthmanager set <file_endpoint_uri> --system
-    azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id>
-    azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file> [--authority-host <authority_host>] [--resource <resource>]
+    azfilesauthmanager set <file_endpoint_uri> --system [--force]
+    azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id> [--force]
+    azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file> [--authority-host <authority_host>] [--resource <resource>] [--force]
     azfilesauthmanager clear <file_endpoint_uri>
     azfilesauthmanager --version
 """
@@ -291,26 +293,57 @@ def _normalize_endpoint(file_endpoint_uri):
     return str(file_endpoint_uri).strip().rstrip("/")
 
 
-def _read_auth_state():
-    try:
-        with open(AUTH_STATE_FILE_PATH, "r") as state_file:
-            state = json.load(state_file)
-        return state if isinstance(state, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+class AuthMetadataConflict(Exception):
+    """Raised when persisted auth metadata belongs to a different identity than requested."""
 
 
-def _write_auth_state(state):
-    try:
+@contextlib.contextmanager
+def _locked_state_file(exclusive, create=True):
+    # Taking the flock before touching contents keeps read-modify-write atomic
+    # across concurrent azfilesauthmanager/azfilesrefresh invocations. `create`
+    # is only needed for writers; readers/no-op callers skip creating the dir
+    # and file so a not-yet-existing state file is treated as empty state.
+    if create:
         os.makedirs(AUTH_STATE_DIR, mode=0o750, exist_ok=True)
         os.chmod(AUTH_STATE_DIR, 0o750)
-        with open(AUTH_STATE_FILE_PATH, "w") as state_file:
-            os.chmod(AUTH_STATE_FILE_PATH, 0o640)
-            json.dump(state, state_file, indent=2, sort_keys=True)
-            state_file.write("\n")
-    except OSError:
-        print(f"Error writing auth metadata to {AUTH_STATE_FILE_PATH}")
-        sys.exit(1)
+        fd = os.open(AUTH_STATE_FILE_PATH, os.O_RDWR | os.O_CREAT, 0o640)
+    else:
+        try:
+            fd = os.open(AUTH_STATE_FILE_PATH, os.O_RDWR)
+        except FileNotFoundError:
+            yield None
+            return
+
+    state_file = os.fdopen(fd, "r+")
+    try:
+        fcntl.flock(state_file.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield state_file
+        finally:
+            fcntl.flock(state_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        state_file.close()
+
+
+def _load_locked_state(state_file):
+    state_file.seek(0)
+    content = state_file.read()
+    if not content.strip():
+        return {}
+    try:
+        state = json.loads(content)
+    except json.JSONDecodeError:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _save_locked_state(state_file, state):
+    state_file.seek(0)
+    state_file.truncate()
+    json.dump(state, state_file, indent=2, sort_keys=True)
+    state_file.write("\n")
+    state_file.flush()
+    os.fsync(state_file.fileno())
 
 
 def get_endpoint_auth_metadata(file_endpoint_uri):
@@ -318,92 +351,122 @@ def get_endpoint_auth_metadata(file_endpoint_uri):
     if not endpoint:
         return None
 
-    return _read_auth_state().get(endpoint)
+    try:
+        with _locked_state_file(exclusive=False, create=False) as state_file:
+            if state_file is None:
+                return None
+            state = _load_locked_state(state_file)
+    except OSError as e:
+        print(f"Error reading auth metadata from {AUTH_STATE_FILE_PATH}: {e}")
+        return None
+
+    return state.get(endpoint)
 
 
-def set_endpoint_auth_metadata(file_endpoint_uri, auth_mode, tenant_id=None, client_id=None, token_file=None, authority_host=None, resource=None):
+def _describe_auth_metadata_conflict(previous_metadata, auth_mode, tenant_id, client_id):
+    """Return a human-readable conflict reason, or None if the identities agree."""
+    previous_mode = previous_metadata.get("auth_mode")
+    previous_client_id = previous_metadata.get("client_id")
+    previous_tenant_id = previous_metadata.get("tenant_id")
+
+    if previous_mode and previous_mode != auth_mode:
+        return f"existing auth_mode='{previous_mode}' does not match requested auth_mode='{auth_mode}'"
+
+    if auth_mode == "user-assigned" and client_id and previous_client_id and previous_client_id != client_id:
+        return f"existing client_id='{previous_client_id}' does not match requested client_id='{client_id}'"
+
+    if auth_mode == "workload-identity":
+        if client_id and previous_client_id and previous_client_id != client_id:
+            return f"existing client_id='{previous_client_id}' does not match requested client_id='{client_id}'"
+        if tenant_id and previous_tenant_id and previous_tenant_id != tenant_id:
+            return f"existing tenant_id='{previous_tenant_id}' does not match requested tenant_id='{tenant_id}'"
+
+    return None
+
+
+def azfiles_set_oauth(file_endpoint_uri, oauth_token, auth_mode=None, tenant_id=None, client_id=None, token_file=None, authority_host=None, resource=None, force=False):
+    """Write the oauth token via the native lib and (if auth_mode is given) persist
+    endpoint auth metadata, as a single operation under one exclusive lock so the
+    krb5/keyring credential store and the state file can never observe each other
+    mid-update. Raises AuthMetadataConflict before touching either store if the
+    endpoint is already owned by a different identity, unless force=True."""
     endpoint = _normalize_endpoint(file_endpoint_uri)
-    if not endpoint or not auth_mode:
-        return
-
-    metadata = {"auth_mode": auth_mode}
-    optional_metadata = {
-        "tenant_id": tenant_id,
-        "client_id": client_id,
-        "token_file": token_file,
-        "authority_host": authority_host,
-        "resource": resource,
-    }
-    for metadata_key in optional_metadata:
-        metadata_value = optional_metadata[metadata_key]
-        if metadata_value is not None:
-            metadata[metadata_key] = metadata_value
-
-    state = _read_auth_state()
-    state[endpoint] = metadata
-    _write_auth_state(state)
-
-
-def clear_endpoint_auth_metadata(file_endpoint_uri):
-    endpoint = _normalize_endpoint(file_endpoint_uri)
-    if not endpoint:
-        return
-
-    state = _read_auth_state()
-    if endpoint not in state:
-        return
-
-    del state[endpoint]
-    _write_auth_state(state)
-
-
-def azfiles_set_oauth(file_endpoint_uri, oauth_token):
-
-    validity_in_sec = ctypes.c_uint()
 
     try:
-        rc = lib.extern_smb_set_credential_oauth_token(
-            file_endpoint_uri.encode('utf-8'), 
-            oauth_token.encode('utf-8'),
-            ctypes.byref(validity_in_sec)
-            )
+        with _locked_state_file(exclusive=True) as state_file:
+            state = _load_locked_state(state_file)
+            previous_metadata = state.get(endpoint) if endpoint else None
 
-        if rc != 0:
-            print(f"[-] Error calling AzAuthenticatorLib: {rc}")
-            sys.exit(1)
+            if auth_mode and previous_metadata:
+                conflict_reason = _describe_auth_metadata_conflict(previous_metadata, auth_mode, tenant_id, client_id)
+                if conflict_reason:
+                    if not force:
+                        raise AuthMetadataConflict(f"Endpoint {endpoint}: {conflict_reason}")
+                    print(f"[!] Forcing overwrite for endpoint {endpoint}: {conflict_reason}")
 
-    except subprocess.CalledProcessError as e:
-        print(f"Error calling AzAuthenticatorLib: {e.stderr}")
+            validity_in_sec = ctypes.c_uint()
+            rc = lib.extern_smb_set_credential_oauth_token(
+                file_endpoint_uri.encode('utf-8'),
+                oauth_token.encode('utf-8'),
+                ctypes.byref(validity_in_sec)
+                )
+
+            if rc != 0:
+                print(f"[-] Error calling AzAuthenticatorLib: {rc}")
+                sys.exit(1)
+
+            if auth_mode and endpoint:
+                metadata = {"auth_mode": auth_mode}
+                optional_metadata = {
+                    "tenant_id": tenant_id,
+                    "client_id": client_id,
+                    "token_file": token_file,
+                    "authority_host": authority_host,
+                    "resource": resource,
+                }
+                for metadata_key, metadata_value in optional_metadata.items():
+                    if metadata_value is not None:
+                        metadata[metadata_key] = metadata_value
+                state[endpoint] = metadata
+                _save_locked_state(state_file, state)
+    except OSError as e:
+        print(f"Error accessing auth metadata at {AUTH_STATE_FILE_PATH}: {e}")
         sys.exit(1)
 
 
 def azfiles_clear(file_endpoint_uri):
-    clear_endpoint_auth_metadata(file_endpoint_uri)
+    endpoint = _normalize_endpoint(file_endpoint_uri)
 
     try:
-        rc = lib.extern_smb_clear_credential(file_endpoint_uri.encode())
-        print(f"azfilesauthmanager clear: {rc}")
+        with _locked_state_file(exclusive=True) as state_file:
+            state = _load_locked_state(state_file)
 
-        if rc != 0:
-            print(f"[-] Error calling AzAuthenticatorLib: {rc}")
-            sys.exit(1)
+            rc = lib.extern_smb_clear_credential(file_endpoint_uri.encode())
+            print(f"azfilesauthmanager clear: {rc}")
 
-    except subprocess.CalledProcessError as e:
-        print(f"Error calling AzAuthenticatorLib: {e.stderr}")
+            if rc != 0:
+                print(f"[-] Error calling AzAuthenticatorLib: {rc}")
+                sys.exit(1)
+
+            if endpoint and endpoint in state:
+                del state[endpoint]
+                _save_locked_state(state_file, state)
+    except OSError as e:
+        print(f"Error accessing auth metadata at {AUTH_STATE_FILE_PATH}: {e}")
         sys.exit(1)
 
 
 def azfiles_list(is_json):
     try:
-        rc = lib.extern_smb_list_credential(is_json)
-        # The C function returns 0 on success, non-zero on error. ctypes will not raise.
-        if rc != 0:
-            # Propagate the exact code so callers / scripts can branch on it.
-            print(f"[-] Error calling AzAuthenticatorLib: {rc}")
-            sys.exit(rc)
-
-    except subprocess.CalledProcessError as e:
-        print(f"Error calling AzAuthenticatorLib: {e.stderr}")
+        with _locked_state_file(exclusive=False) as state_file:
+            rc = lib.extern_smb_list_credential(is_json)
+            # The C function returns 0 on success, non-zero on error. ctypes will not raise.
+            if rc != 0:
+                # Propagate the exact code so callers / scripts can branch on it.
+                print(f"[-] Error calling AzAuthenticatorLib: {rc}")
+                sys.exit(rc)
+    except OSError as e:
+        print(f"Error accessing auth metadata at {AUTH_STATE_FILE_PATH}: {e}")
         sys.exit(1)
 
 
@@ -454,6 +517,12 @@ def run_azfilesauthmanager():
             print(USAGE_MESSAGE)
             sys.exit(1)
 
+        # Strip --force up front so it doesn't disturb the positional argument
+        # counts/indices the rest of the parsing below relies on.
+        force = "--force" in argv
+        if force:
+            argv = [arg for arg in argv if arg != "--force"]
+
         file_endpoint_uri = argv[2]
 
         is_system_mi = False
@@ -480,7 +549,11 @@ def run_azfilesauthmanager():
             oauth_token = get_oauth_token(client_id)
             if oauth_token is None:
                 sys.exit(1)
-            set_endpoint_auth_metadata(file_endpoint_uri, "user-assigned", client_id=client_id)
+            try:
+                azfiles_set_oauth(file_endpoint_uri, oauth_token, auth_mode="user-assigned", client_id=client_id, force=force)
+            except AuthMetadataConflict as e:
+                print(f"[-] Refusing to set credential: {e}")
+                sys.exit(3)
         # System-assigned MI path
         elif is_system_mi:
             if len(argv) != 4:  # set <endpoint> --system
@@ -489,7 +562,11 @@ def run_azfilesauthmanager():
             oauth_token = get_oauth_token()
             if oauth_token is None:
                 sys.exit(1)
-            set_endpoint_auth_metadata(file_endpoint_uri, "system")
+            try:
+                azfiles_set_oauth(file_endpoint_uri, oauth_token, auth_mode="system", force=force)
+            except AuthMetadataConflict as e:
+                print(f"[-] Refusing to set credential: {e}")
+                sys.exit(3)
         # Workload Identity path
         elif is_workload_identity:
             tenant_id = None
@@ -527,24 +604,29 @@ def run_azfilesauthmanager():
             )
             if oauth_token is None:
                 sys.exit(1)
-            set_endpoint_auth_metadata(
-                file_endpoint_uri,
-                "workload-identity",
-                tenant_id=tenant_id,
-                client_id=client_id,
-                token_file=token_file,
-                authority_host=authority_host,
-                resource=resource,
-            )
+            try:
+                azfiles_set_oauth(
+                    file_endpoint_uri,
+                    oauth_token,
+                    auth_mode="workload-identity",
+                    tenant_id=tenant_id,
+                    client_id=client_id,
+                    token_file=token_file,
+                    authority_host=authority_host,
+                    resource=resource,
+                    force=force,
+                )
+            except AuthMetadataConflict as e:
+                print(f"[-] Refusing to set credential: {e}")
+                sys.exit(3)
         else:
             # Direct token form: set <endpoint> <oauth_token>
             if len(argv) != 4:
                 print(USAGE_MESSAGE)
                 sys.exit(1)
             oauth_token = argv[3]
+            azfiles_set_oauth(file_endpoint_uri, oauth_token)
 
-        azfiles_set_oauth(file_endpoint_uri, oauth_token)
-    
     elif command == "clear":
         if len(sys.argv) != 3:
             print(USAGE_MESSAGE)
