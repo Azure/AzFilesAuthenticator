@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 COPY *.deb /tmp/
 
 RUN apt-get update && \
-    apt-get install -y /tmp/azfilesauth_*.deb && \
+    apt-get install -y cifs-utils keyutils /tmp/azfilesauth_*.deb && \
     apt-get clean
 
 # Validate

@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
 COPY *.rpm /tmp/
 
-RUN tdnf -y install shadow-utils /tmp/azfilesauth-*.x86_64.rpm && \
+RUN tdnf -y install shadow-utils cifs-utils keyutils /tmp/azfilesauth-*.x86_64.rpm && \
     tdnf clean all
 
 # Validate
