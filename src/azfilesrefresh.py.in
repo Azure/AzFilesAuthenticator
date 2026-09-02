@@ -195,6 +195,10 @@ def refresh_ticket(ticket):
                 refresh_client_id = metadata.get("client_id") or client_id
                 log_status(f"Skipping workload identity for {endpoint} with client_id={refresh_client_id}")
                 return
+            elif auth_mode == "token":
+                # A directly-supplied OAuth token has no credential source to refresh from. Skip these.
+                log_status(f"Skipping refresh for {endpoint}: credential was set via a direct OAuth token.")
+                return
             else:
                 log_error(f"Skipping refresh. Unsupported auth mode '{auth_mode}' for {endpoint}")
                 return

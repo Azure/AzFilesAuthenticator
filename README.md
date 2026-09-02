@@ -210,6 +210,8 @@ sudo azfilesauthmanager set <file_endpoint_uri> <oauth_token>
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs...
 ```
 
+This endpoint is persisted with auth mode `token`. Since there is no credential source to refresh from, `azfilesrefresh` skips these endpoints rather than attempting to renew the ticket; you are responsible for re-running `set` with a fresh token before it expires.
+
 **2. Using System Assigned Managed Identity:**
 
 If your VM has a System Assigned Managed Identity enabled and granted access to the Azure File Share, you can use the `--system` flag. The tool will automatically fetch the token from the Azure Instance Metadata Service (IMDS).
@@ -259,7 +261,7 @@ Each endpoint's identity (auth mode, client ID, tenant ID) is persisted so `azfi
 [-] Refusing to set credential: Endpoint https://mystorageaccount.file.core.windows.net: existing auth_mode='user-assigned' does not match requested auth_mode='system'
 ```
 
-If you understand the risk and want to proceed anyway, pass `--force` with `--system`, `--imds-client-id`, or `--workload-identity` to overwrite the existing identity for that endpoint:
+If you understand the risk and want to proceed anyway, pass `--force` with `--system`, `--imds-client-id`, `--workload-identity`, or a direct OAuth token to overwrite the existing identity for that endpoint:
 
 ```bash
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --system --force
