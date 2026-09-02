@@ -8,9 +8,11 @@ import time
 import ctypes
 import requests
 import json
+import yaml
 
 LOG_FILE = "/var/log/azfilestests.log"
 CONFIG_FILE_PATH = "./test_config.yaml"
+AZFILESAUTH_CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 
 USAGE_MESSAGE = """
 Usage: 
@@ -45,6 +47,21 @@ lib.extern_smb_clear_credential.restype = ctypes.c_int
 lib.extern_smb_list_credential.argtypes = [ctypes.c_bool]
 
 config = {}
+
+
+def load_yaml_config(path):
+    with open(path, "r") as config_file:
+        loaded_config = yaml.safe_load(config_file) or {}
+    if not isinstance(loaded_config, dict):
+        raise ValueError(f"Configuration root in {path} must be a mapping")
+    return loaded_config
+
+
+def save_yaml_config(path, loaded_config):
+    if not isinstance(loaded_config, dict):
+        raise ValueError(f"Configuration root in {path} must be a mapping")
+    with open(path, "w") as config_file:
+        yaml.safe_dump(loaded_config, config_file, default_flow_style=False, sort_keys=False)
 
 
 def list_credentials():
@@ -138,29 +155,18 @@ def config_setup():
     config["CRUID"] = cruid
 
     print(f"\n[+] Changing KRB5_CC_NAME in /etc/azfileauth/config.yaml to: /tmp/krb5cc_{config['CRUID']}", flush=True)
-    command = f"""sudo sh -c 'echo "KRB5_CC_NAME: /tmp/krb5cc_{config['CRUID']}" > /etc/azfilesauth/config.yaml'"""
-    rc = os.system(command)
-
-    if rc != 0:
+    try:
+        azfilesauth_config = load_yaml_config(AZFILESAUTH_CONFIG_FILE_PATH)
+        azfilesauth_config["KRB5_CC_NAME"] = f"/tmp/krb5cc_{config['CRUID']}"
+        save_yaml_config(AZFILESAUTH_CONFIG_FILE_PATH, azfilesauth_config)
+    except Exception as error:
         print("[-] Failed to update KRB5_CC_NAME in azfilesauth config.yaml")
+        print(f"[-] {error}")
         cleanup(1)
 
     try:
-        with open(CONFIG_FILE_PATH, "r") as config_file:
-            for line in config_file:
-                if "CLIENT_ID" in line:
-                    config["CLIENT_ID"] = line.split(":", 1)[1].strip()
-                if "TENANT_ID" in line:
-                    config["TENANT_ID"] = line.split(":", 1)[1].strip()
-                if "CLIENT_SECRET" in line:
-                    config["CLIENT_SECRET"] = line.split(":", 1)[1].strip()
-                if "RESOURCE" in line:
-                    config["RESOURCE"] = line.split(":", 1)[1].strip()    
-                if "MOUNT_PATH" in line:
-                    config["MOUNT_PATH"] = line.split(":", 1)[1].strip()
-                if "SHARE_NAME" in line:
-                    config["SHARE_NAME"] = line.split(":", 1)[1].strip()
-    except:
+        config.update(load_yaml_config(CONFIG_FILE_PATH))
+    except Exception:
         print(f"Error reading the config file from {CONFIG_FILE_PATH}. Check if the file exists.")
         cleanup(1)
 

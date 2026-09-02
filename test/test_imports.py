@@ -72,6 +72,13 @@ def collect_defined_names(path):
     import builtins
     defined.update(dir(builtins))
 
+    def add_target_names(target):
+        if isinstance(target, ast.Name):
+            defined.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                add_target_names(element)
+
     for node in ast.walk(tree):
         # function/class defs
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -87,15 +94,14 @@ def collect_defined_names(path):
         # assignments
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name):
-                    defined.add(target.id)
+                add_target_names(target)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             defined.add(node.target.id)
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
             defined.add(node.target.id)
         # for/with targets
-        elif isinstance(node, ast.For) and isinstance(node.target, ast.Name):
-            defined.add(node.target.id)
+        elif isinstance(node, ast.For):
+            add_target_names(node.target)
         elif isinstance(node, ast.With):
             for item in node.items:
                 if item.optional_vars and isinstance(item.optional_vars, ast.Name):

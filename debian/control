@@ -2,11 +2,11 @@ Source: azfilesauth
 Section: utils
 Priority: optional
 Maintainer: Ritvik Budhiraja <rbudhiraja@microsoft.com>
-Build-Depends: debhelper-compat (= 13), autotools-dev, automake, autoconf, libtool, g++ , libkrb5-dev, libcurl4-openssl-dev, python3 (>= 3.8)
+Build-Depends: debhelper-compat (= 13), autotools-dev, automake, autoconf, libtool, g++ , libkrb5-dev, libcurl4-openssl-dev, libyaml-dev, python3 (>= 3.8)
 Standards-Version: 4.6.0
 
 Package: azfilesauth
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, python3 (>= 3.8), python3-pip
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3 (>= 3.8), python3-pip, python3-yaml
 Description: Authentication utility for Azure Files with Kerberos
  A utility to handle Kerberos-based authentication for Azure Files, including a shared library and a Python manager script.

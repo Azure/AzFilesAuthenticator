@@ -4,6 +4,7 @@ ACLOCAL_AMFLAGS = -I m4
 lib_LTLIBRARIES = libazfilesauth.la
 libazfilesauth_la_SOURCES = src/azfilesauth.cpp
 libazfilesauth_la_LDFLAGS = -shared -fPIC -lcurl -lkrb5
+libazfilesauth_la_LIBADD = $(YAML_LIBS)
 libazfilesauth_la_CPPFLAGS = -Iinclude
 
 # Install configuration file

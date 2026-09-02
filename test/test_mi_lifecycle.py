@@ -4,12 +4,16 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import yaml
+
 EPOCH_RE = re.compile(r"\(epoch:\s*(\d+)\)")
+AZFILESAUTH_CONFIG_PATH = Path("/etc/azfilesauth/config.yaml")
 
 
 def run_cmd(cmd, check=True, capture=True, env=None):
@@ -40,12 +44,20 @@ def ensure_root():
         sys.exit(1)
 
 
+def load_azfilesauth_config():
+    if not AZFILESAUTH_CONFIG_PATH.exists():
+        return {}
+    with AZFILESAUTH_CONFIG_PATH.open("r", encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file) or {}
+    if not isinstance(config, dict):
+        raise ValueError("azfilesauth configuration root must be a mapping")
+    return config
+
+
 def get_cruid():
-    config_path = Path("/etc/azfilesauth/config.yaml")
-    if config_path.exists():
-        for line in config_path.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("USER_UID:"):
-                return line.split(":", 1)[1].strip()
+    user_uid = load_azfilesauth_config().get("USER_UID")
+    if user_uid is not None:
+        return str(user_uid)
     result = run_cmd(["id", "-u", "azfilesuser"], check=False)
     if result.returncode == 0:
         return result.stdout.strip()
@@ -53,13 +65,9 @@ def get_cruid():
 
 
 def get_ccache_name(cruid):
-    config_path = Path("/etc/azfilesauth/config.yaml")
-    if config_path.exists():
-        for line in config_path.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("KRB5_CC_NAME:"):
-                value = line.split(":", 1)[1].strip()
-                if value:
-                    return value
+    ccache_name = load_azfilesauth_config().get("KRB5_CC_NAME")
+    if ccache_name:
+        return str(ccache_name)
     return f"FILE:/tmp/krb5cc_{cruid}"
 
 
@@ -120,6 +128,11 @@ def unmount_if_mounted(mount_point):
             return
         run_cmd(["umount", mount_point], check=False)
         time.sleep(1)
+
+
+def manage_refresh_service(action):
+    if shutil.which("systemctl"):
+        run_cmd(["systemctl", action, "azfilesrefresh"], check=False)
 
 
 def write_and_read_probe(mount_point, tag):
@@ -194,7 +207,7 @@ def scenario_expiry(endpoint, storage_account, file_share, mount_base, mode, use
     # Stop the systemd service to avoid running two concurrent daemon instances.
     # The service uses default REFRESH_BEFORE_EXPIRY (5 min) which would not
     # refresh a freshly obtained ticket; we need env-var overrides to force it.
-    run_cmd(["systemctl", "stop", "azfilesrefresh"], check=False)
+    manage_refresh_service("stop")
     try:
         # AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS > ticket remaining lifetime forces
         # is_expiring() to True so the daemon fetches a fresh ticket.
@@ -227,7 +240,7 @@ def scenario_expiry(endpoint, storage_account, file_share, mount_base, mode, use
                 f"(before={before_epoch}, after={after_epoch})"
             )
     finally:
-        run_cmd(["systemctl", "start", "azfilesrefresh"], check=False)
+        manage_refresh_service("start")
         unmount_if_mounted(mount_point)
         clear_credentials(endpoint)
 
@@ -249,7 +262,7 @@ def scenario_daemon_refresh(endpoint, storage_account, file_share, mount_base, m
     if not ok:
         raise RuntimeError(f"Mount failed before daemon refresh: {result.stderr}")
 
-    run_cmd(["systemctl", "stop", "azfilesrefresh"], check=False)
+    manage_refresh_service("stop")
     try:
         write_and_read_probe(mount_point, f"pre-daemon-{mode}")
 
@@ -281,7 +294,7 @@ def scenario_daemon_refresh(endpoint, storage_account, file_share, mount_base, m
 
         write_and_read_probe(mount_point, f"post-daemon-{mode}")
     finally:
-        run_cmd(["systemctl", "start", "azfilesrefresh"], check=False)
+        manage_refresh_service("start")
         unmount_if_mounted(mount_point)
         clear_credentials(endpoint)
 

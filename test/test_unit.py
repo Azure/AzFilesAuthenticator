@@ -21,6 +21,7 @@ import os
 import re
 import signal
 import sys
+import tempfile
 import textwrap
 import time
 import types
@@ -154,6 +155,58 @@ def _load_refresh():
 
 
 # ===================================================================
+# Test: azfilesauthmanager.py — YAML configuration
+# ===================================================================
+
+class TestYamlConfig(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_config_round_trip_preserves_nested_mappings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w") as config_file:
+                config_file.write(
+                    "ENVIRONMENT:\n"
+                    "  MSI_ENDPOINT: http://localhost/token\n"
+                    "KRB5_CC_NAME: FILE:/tmp/krb5cc_1000\n"
+                )
+
+            with mock.patch.dict(
+                self.mod.load_config.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ):
+                config = self.mod.load_config()
+                config["USER_UID"] = 1000
+                self.mod.save_config(config)
+                saved_config = self.mod.load_config()
+
+        self.assertEqual(saved_config["ENVIRONMENT"]["MSI_ENDPOINT"], "http://localhost/token")
+        self.assertEqual(saved_config["KRB5_CC_NAME"], "FILE:/tmp/krb5cc_1000")
+        self.assertEqual(saved_config["USER_UID"], 1000)
+
+    def test_init_new_user_preserves_existing_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w") as config_file:
+                config_file.write("ENVIRONMENT:\n  MSI_SECRET: example-secret\n")
+
+            with mock.patch.dict(
+                self.mod.init_new_user.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ), mock.patch("os.system", return_value=0), mock.patch(
+                "subprocess.check_output", return_value=b"1001"
+            ):
+                user_uid = self.mod.init_new_user()
+                saved_config = self.mod.load_config()
+
+        self.assertEqual(user_uid, "1001")
+        self.assertEqual(saved_config["ENVIRONMENT"]["MSI_SECRET"], "example-secret")
+        self.assertEqual(saved_config["USER_UID"], 1001)
+
+
+# ===================================================================
 # Test: azfilesauthmanager.py — token acquisition logic
 # ===================================================================
 
@@ -190,6 +243,39 @@ class TestGetOauthToken(unittest.TestCase):
         self.assertEqual(token, "user-tok-xyz")
         mock_cred.assert_called_once_with(client_id="my-client-id")
         credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
+
+    def test_loads_environment_before_managed_identity_credential(self):
+        token_response = mock.MagicMock(token="env-token")
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w") as config_file:
+                config_file.write(
+                    "ENVIRONMENT:\n"
+                    "  MSI_ENDPOINT: http://localhost:40342/msi/token\n"
+                    "  LITERAL_DOLLAR: $HOME\n"
+                    "  RETRY_ENABLED: true\n"
+                )
+
+            def create_credential():
+                self.assertEqual(os.environ["MSI_ENDPOINT"], "http://localhost:40342/msi/token")
+                self.assertEqual(os.environ["LITERAL_DOLLAR"], "$HOME")
+                self.assertEqual(os.environ["RETRY_ENABLED"], "True")
+                return credential
+
+            with mock.patch.dict(os.environ, {"MSI_ENDPOINT": "old-value"}):
+                with mock.patch.dict(
+                    self.mod.get_oauth_token.__globals__,
+                    {
+                        "CONFIG_FILE_PATH": config_path,
+                        "ManagedIdentityCredential": mock.MagicMock(side_effect=create_credential),
+                    },
+                ):
+                    token = self.mod.get_oauth_token()
+
+        self.assertEqual(token, "env-token")
 
     def test_empty_client_id_uses_system_assigned_identity(self):
         token_response = mock.MagicMock()
@@ -259,7 +345,13 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         credential.get_token.return_value = token_response
 
         mock_cred = mock.MagicMock(return_value=credential)
-        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+        with mock.patch.dict(
+            self.mod.get_workload_identity_token.__globals__,
+            {
+                "ClientAssertionCredential": mock_cred,
+                "load_azure_identity_environment": mock.MagicMock(return_value=True),
+            },
+        ):
             token = self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
 
         self.assertEqual(token, "wi-token-123")
@@ -270,6 +362,35 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         self.assertEqual(kwargs["func"](), "jwt-assertion-data")
         credential.get_token.assert_called_once_with("https://storage.azure.com/.default")
 
+    def test_loads_environment_before_client_assertion_credential(self):
+        token_response = mock.MagicMock(token="env-token")
+        credential = mock.MagicMock()
+        credential.get_token.return_value = token_response
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_path = os.path.join(temp_dir, "federated-token")
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(token_path, "w") as token_file:
+                token_file.write("jwt-assertion-data")
+            with open(config_path, "w") as config_file:
+                config_file.write("ENVIRONMENT:\n  AZURE_AUTHORITY_HOST: https://login.example.test\n")
+
+            def create_credential(**kwargs):
+                self.assertEqual(os.environ["AZURE_AUTHORITY_HOST"], "https://login.example.test")
+                return credential
+
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with mock.patch.dict(
+                    self.mod.get_workload_identity_token.__globals__,
+                    {
+                        "CONFIG_FILE_PATH": config_path,
+                        "ClientAssertionCredential": mock.MagicMock(side_effect=create_credential),
+                    },
+                ):
+                    token = self.mod.get_workload_identity_token("tenant-1", "client-1", token_path)
+
+        self.assertEqual(token, "env-token")
+
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
     def test_default_authority_is_public(self):
         token_response = mock.MagicMock()
@@ -278,7 +399,13 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         credential.get_token.return_value = token_response
 
         mock_cred = mock.MagicMock(return_value=credential)
-        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+        with mock.patch.dict(
+            self.mod.get_workload_identity_token.__globals__,
+            {
+                "ClientAssertionCredential": mock_cred,
+                "load_azure_identity_environment": mock.MagicMock(return_value=True),
+            },
+        ):
             self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
 
         kwargs = mock_cred.call_args.kwargs
@@ -293,7 +420,13 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         credential.get_token.return_value = token_response
 
         mock_cred = mock.MagicMock(return_value=credential)
-        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+        with mock.patch.dict(
+            self.mod.get_workload_identity_token.__globals__,
+            {
+                "ClientAssertionCredential": mock_cred,
+                "load_azure_identity_environment": mock.MagicMock(return_value=True),
+            },
+        ):
             self.mod.get_workload_identity_token(
                 "tenant-1", "client-1", "/tok",
                 resource="https://storage.azure.com/",
@@ -309,7 +442,13 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         credential.get_token.return_value = token_response
 
         mock_cred = mock.MagicMock(return_value=credential)
-        with mock.patch.dict(self.mod.get_workload_identity_token.__globals__, {"ClientAssertionCredential": mock_cred}):
+        with mock.patch.dict(
+            self.mod.get_workload_identity_token.__globals__,
+            {
+                "ClientAssertionCredential": mock_cred,
+                "load_azure_identity_environment": mock.MagicMock(return_value=True),
+            },
+        ):
             # Mooncake (Azure China) authority host; trailing slash must be normalized.
             self.mod.get_workload_identity_token(
                 "tenant-1", "client-1", "/tok",

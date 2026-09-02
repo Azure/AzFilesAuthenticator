@@ -61,7 +61,7 @@ The package location and installation steps differ depending on your Linux distr
 
 ### Python Dependencies
 
-`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`). When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script runs `pip3 install azure-identity azure-core` automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
+`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) and PyYAML. When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script installs the Python dependencies automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
 
 ### Storage Account Prerequisite
 
@@ -345,6 +345,30 @@ These functions are used by the command-line utility to perform the required ope
   LOG_FILE_PATH: /var/log/azfilesauth.log
   ```
 
+### Azure Identity environment variables
+
+To pass environment-specific settings such as `MSI_ENDPOINT` to the Azure Identity SDK, add them directly under `ENVIRONMENT` in `/etc/azfilesauth/config.yaml`:
+
+```yaml
+ENVIRONMENT:
+  MSI_ENDPOINT: http://localhost:40342/metadata/identity/oauth2/token
+  MSI_SECRET: example-secret
+  # AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+```
+
+The configuration is parsed with PyYAML's safe loader and is not executed as shell code. Variable names are case-sensitive, and values are converted to strings without shell expansion. Quote values when YAML might otherwise interpret their type, such as `"true"`, `"123"`, or `"null"`.
+
+The mapping is loaded immediately before each `ManagedIdentityCredential` or `ClientAssertionCredential` is created. This includes token renewal by the `azfilesrefresh` daemon, so no service-level environment configuration is required. Values in the mapping override variables inherited by the process, and changes take effect on the next token request.
+
+The daemon runs as root. Restrict the configuration file to root, especially when it contains secrets:
+
+```bash
+sudo chown root:root /etc/azfilesauth/config.yaml
+sudo chmod 600 /etc/azfilesauth/config.yaml
+```
+
+If `ENVIRONMENT` is omitted, Azure Identity uses the daemon's existing environment. If it is not a mapping or contains an invalid entry, token acquisition fails and the error is logged by the caller.
+
 ## Security Notes
 
 - All operations performed by the Azure Files Authentication Manager tool require root privileges to ensure secure handling of authentication credentials.
@@ -573,12 +597,12 @@ To build and install the library from source, follow these steps:
     **Debian/Ubuntu:**
     ```bash
     sudo apt-get update
-    sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev
+    sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev libyaml-dev
     ```
 
     **RHEL/Azure Linux:**
     ```bash
-    sudo dnf install gcc-c++ make automake autoconf libtool curl-devel krb5-devel python3
+    sudo dnf install gcc-c++ make automake autoconf libtool curl-devel krb5-devel libyaml-devel python3
     ```
 
 2. **Build and Install the Library:**

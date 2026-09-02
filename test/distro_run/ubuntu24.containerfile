@@ -6,8 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 COPY *.deb /tmp/
 
 RUN apt-get update && \
-    apt-get install -y python3 python3-requests libcurl4t64 libkrb5-3 && \
-    dpkg -i /tmp/azfilesauth_*.deb || apt-get install -f -y && \
+    apt-get install -y /tmp/azfilesauth_*.deb && \
     apt-get clean
 
 # Validate
