@@ -7,6 +7,13 @@ import time
 import ctypes
 import pwd
 try:
+    import yaml
+    YAML_IMPORT_ERROR = None
+except ImportError as e:
+    yaml = None
+    YAML_IMPORT_ERROR = e
+
+try:
     from azure.identity import ManagedIdentityCredential, ClientAssertionCredential
     from azure.core.exceptions import ClientAuthenticationError
     AZURE_IDENTITY_IMPORT_ERROR = None
@@ -57,17 +64,74 @@ lib.extern_smb_list_credential.restype = ctypes.c_int
 lib.extern_smb_version.restype = ctypes.c_char_p
 
 
+def load_config():
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to read the configuration")
+
+    with open(CONFIG_FILE_PATH, "r") as config_file:
+        config = yaml.safe_load(config_file) or {}
+    if not isinstance(config, dict):
+        raise ValueError("configuration root must be a mapping")
+    return config
+
+
+def save_config(config):
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to write the configuration")
+    if not isinstance(config, dict):
+        raise ValueError("configuration root must be a mapping")
+
+    with open(CONFIG_FILE_PATH, "w") as config_file:
+        yaml.safe_dump(config, config_file, default_flow_style=False, sort_keys=False)
+
+
 def ensure_azure_identity_dependencies():
-    if ManagedIdentityCredential is not None and ClientAssertionCredential is not None:
+    if yaml is not None and ManagedIdentityCredential is not None and ClientAssertionCredential is not None:
         return True
 
     print(
-        "Missing Python dependencies: azure-identity and azure-core. "
-        "Install them (e.g. 'pip3 install azure-identity azure-core') and retry."
+        "Missing Python dependencies: azure-identity and azure-core; PyYAML is also required. "
+        "Install them (e.g. 'pip3 install azure-identity azure-core PyYAML') and retry."
     )
     if AZURE_IDENTITY_IMPORT_ERROR is not None:
         print(f"Dependency import error: {AZURE_IDENTITY_IMPORT_ERROR}")
+    if YAML_IMPORT_ERROR is not None:
+        print(f"Dependency import error: {YAML_IMPORT_ERROR}")
     return False
+
+
+def load_azure_identity_environment():
+    if yaml is None:
+        print("Missing Python dependency: PyYAML. Install it (e.g. 'pip3 install PyYAML') and retry.")
+        return False
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return True
+    except Exception as e:
+        print(f"Error reading the config file from {CONFIG_FILE_PATH}: {e}")
+        return False
+
+    try:
+        if not isinstance(config, dict):
+            raise ValueError("configuration root must be a mapping")
+
+        environment = config.get("ENVIRONMENT", {})
+        if not isinstance(environment, dict):
+            raise ValueError("ENVIRONMENT must be a mapping")
+
+        for key, value in environment.items():
+            if not isinstance(key, str) or not key or not key.replace("_", "a").isalnum() or key[0].isdigit():
+                raise ValueError(f"invalid environment variable name: {key}")
+            if not isinstance(value, (str, int, float, bool)):
+                raise ValueError(f"environment variable {key} must have a scalar value")
+            os.environ[key] = str(value)
+    except Exception as e:
+        print(f"Error loading Azure Identity environment from {CONFIG_FILE_PATH}: {e}")
+        return False
+
+    return True
 
 
 def init_new_user():
@@ -76,19 +140,17 @@ def init_new_user():
 
     # check if USER_UID is already populated in config file
     try:
-        with open(CONFIG_FILE_PATH, "r") as config_file:
-            for line in config_file:
-                if "USER_UID" in line:
-                    uid = line.split(":")[1].strip()
-                    # check if the uid is for a valid user
-                    try:
-                        pwd.getpwuid(int(uid))
-                        return uid
-                    except:
-                        print(f"User with UID {uid} does not exist.")
-                        break
-    except:
+        config = load_config()
+        uid = config.get("USER_UID")
+        if uid is not None:
+            try:
+                pwd.getpwuid(int(uid))
+                return str(uid)
+            except (KeyError, TypeError, ValueError):
+                print(f"User with UID {uid} does not exist.")
+    except Exception:
         print(f"Either user {new_user} does not exist, or error reading the config file from {CONFIG_FILE_PATH}.")
+        config = {}
 
     # Check if the azfilesuser already exists
     if os.system(f"getent passwd {new_user} > /dev/null 2>&1") == 0:
@@ -113,17 +175,19 @@ def init_new_user():
         print(f"New user {new_user} created with UID: {new_user_uid}")
 
     try:
-        with open(CONFIG_FILE_PATH, "a") as config_file:
-            config_file.write(f"USER_UID: {new_user_uid}\n")
-
-    except:
-        print(f"Error reading the config file from {CONFIG_FILE_PATH}")
+        config["USER_UID"] = int(new_user_uid)
+        save_config(config)
+    except Exception:
+        print(f"Error writing the config file at {CONFIG_FILE_PATH}")
         sys.exit(1)
 
     return new_user_uid
 
 
 def get_oauth_token(client_id=None):
+    if not load_azure_identity_environment():
+        return None
+
     # Use ManagedIdentityCredential for IMDS: system-assigned (no client_id) or user-assigned (with client_id)
     if not ensure_azure_identity_dependencies():
         return None
@@ -156,6 +220,9 @@ def get_oauth_token(client_id=None):
         return None
 
 def get_workload_identity_token(tenant_id, client_id, token_file, authority_host=None, resource=None):
+    if not load_azure_identity_environment():
+        return None
+
     if not all([tenant_id, client_id, token_file]):
         print("Error: Missing parameters for Workload Identity.")
         return None
@@ -262,14 +329,12 @@ def run_azfilesauthmanager():
         print(USAGE_MESSAGE)
         sys.exit(1)
 
-    # read the CONFIG_FILE_PATH and get the "KRB5_CC_NAME" from the yaml file
     try:
-        with open(CONFIG_FILE_PATH, "r") as config_file:
-            for line in config_file:
-                if "KRB5_CC_NAME" in line:
-                    os.environ["KRB5CCNAME"] = line.split(":")[1].strip()
-                    break
-    except:
+        config = load_config()
+        ccache_name = config.get("KRB5_CC_NAME")
+        if ccache_name is not None:
+            os.environ["KRB5CCNAME"] = str(ccache_name)
+    except Exception:
         print(f"Error reading the config file from {CONFIG_FILE_PATH}")
         sys.exit(1)
 

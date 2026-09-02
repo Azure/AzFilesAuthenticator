@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
 RUN tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
-        python3-devel libcurl-devel krb5-devel chrpath git automake \
+        python3-devel libcurl-devel krb5-devel libyaml-devel chrpath git automake \
         binutils glibc-devel kernel-headers && \
     tdnf clean all
 

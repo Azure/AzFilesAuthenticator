@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y git autoconf libtool build-essential python3 \
-        libcurl4-openssl-dev libkrb5-dev debhelper-compat && \
+        libcurl4-openssl-dev libkrb5-dev libyaml-dev debhelper-compat && \
     apt-get clean
 
 WORKDIR /build

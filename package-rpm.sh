@@ -26,7 +26,7 @@ if [ "$PKG" = "zypper" ]; then
     sudo zypper --non-interactive refresh
     sudo zypper --non-interactive install \
         rpm-build autoconf libtool make gcc gcc-c++ \
-        python3-devel libcurl-devel krb5-devel chrpath git automake \
+        python3-devel libcurl-devel krb5-devel libyaml-devel chrpath git automake \
         binutils glibc-devel kernel-default-devel
 
     sudo zypper --non-interactive clean --all || true
@@ -40,7 +40,7 @@ if [ "$PKG" = "zypper" ]; then
 
 else
     sudo $PKG -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel \
-        libcurl-devel krb5-devel chrpath git automake binutils glibc-devel kernel-headers
+        libcurl-devel krb5-devel libyaml-devel chrpath git automake binutils glibc-devel kernel-headers
     sudo $PKG clean all || true
 fi
 

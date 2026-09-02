@@ -5,7 +5,7 @@
 #include <iostream>
 #include <ctime>
 #include <krb5.h>
-#include <fstream>
+#include <yaml.h>
 #include <vector>
 #include <sstream>
 #include "azfilesauth.h"
@@ -48,34 +48,74 @@ static bool dir_exists(const std::string& path) {
     return (::stat(path.c_str(), &st) == 0) && S_ISDIR(st.st_mode);
 }
 
-// Minimal, logging-free config reader to avoid recursion during logger init.
-static std::string read_config_value_raw(const std::string& key) {
-    std::ifstream file(CONFIG_FILE_PATH);
-    if (!file.is_open()) {
-        return "";
+static bool read_yaml_scalar(const std::string& key, std::string& value, std::string& error) {
+    FILE* input = std::fopen(CONFIG_FILE_PATH, "rb");
+    if (!input) {
+        error = std::strerror(errno);
+        return false;
     }
 
-    std::string line;
-    while (std::getline(file, line)) {
-        size_t colon_pos = line.find(":");
-        if (colon_pos != std::string::npos) {
-            std::string found_key = line.substr(0, colon_pos);
-            std::string value = line.substr(colon_pos + 1);
+    yaml_parser_t parser;
+    if (!yaml_parser_initialize(&parser)) {
+        std::fclose(input);
+        error = "failed to initialize YAML parser";
+        return false;
+    }
 
-            // Trim whitespace and quotes
-            found_key.erase(0, found_key.find_first_not_of(" \t"));
-            if (!found_key.empty())
-                found_key.erase(found_key.find_last_not_of(" \t") + 1);
-            value.erase(0, value.find_first_not_of(" \t\""));
-            if (!value.empty())
-                value.erase(value.find_last_not_of(" \t\"") + 1);
+    yaml_document_t document;
+    yaml_parser_set_input_file(&parser, input);
+    if (!yaml_parser_load(&parser, &document)) {
+        error = parser.problem ? parser.problem : "failed to parse YAML";
+        yaml_parser_delete(&parser);
+        std::fclose(input);
+        return false;
+    }
 
-            if (found_key == key) {
-                return value;
+    bool success = true;
+    yaml_node_t* root = yaml_document_get_root_node(&document);
+    if (root && root->type != YAML_MAPPING_NODE) {
+        error = "configuration root must be a mapping";
+        success = false;
+    } else if (root) {
+        for (yaml_node_pair_t* pair = root->data.mapping.pairs.start;
+             pair < root->data.mapping.pairs.top; ++pair) {
+            yaml_node_t* key_node = yaml_document_get_node(&document, pair->key);
+            yaml_node_t* value_node = yaml_document_get_node(&document, pair->value);
+            if (!key_node || key_node->type != YAML_SCALAR_NODE) {
+                continue;
             }
+
+            std::string found_key(
+                reinterpret_cast<const char*>(key_node->data.scalar.value),
+                key_node->data.scalar.length);
+            if (found_key != key) {
+                continue;
+            }
+            if (!value_node || value_node->type != YAML_SCALAR_NODE) {
+                error = "configuration value for " + key + " must be a scalar";
+                success = false;
+                break;
+            }
+
+            value.assign(
+                reinterpret_cast<const char*>(value_node->data.scalar.value),
+                value_node->data.scalar.length);
+            break;
         }
     }
-    return "";
+
+    yaml_document_delete(&document);
+    yaml_parser_delete(&parser);
+    std::fclose(input);
+    return success;
+}
+
+// Logging-free wrapper to avoid recursion during logger initialization.
+static std::string read_config_value_raw(const std::string& key) {
+    std::string value;
+    std::string error;
+    read_yaml_scalar(key, value, error);
+    return value;
 }
 
 static const char* prio_to_str(int p) {
@@ -208,34 +248,14 @@ std::string read_config_value(const std::string& key) {
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
-    std::ifstream file(CONFIG_FILE_PATH);
-    if (!file.is_open()) {
-        syslog(LOG_ERR, "Cannot open config file %s", CONFIG_FILE_PATH);
-        return "";
+    std::string value;
+    std::string error;
+    if (!read_yaml_scalar(key, value, error)) {
+        syslog(LOG_ERR, "Cannot parse config file %s: %s", CONFIG_FILE_PATH, error.c_str());
     }
 
-    std::string line;
-    while (std::getline(file, line)) {
-        size_t colon_pos = line.find(":");
-        if (colon_pos != std::string::npos) {
-            std::string found_key = line.substr(0, colon_pos);
-            std::string value = line.substr(colon_pos + 1);
-
-            // Trim whitespace
-            found_key.erase(0, found_key.find_first_not_of(" \t"));
-            found_key.erase(found_key.find_last_not_of(" \t") + 1);
-            value.erase(0, value.find_first_not_of(" \t\""));
-            value.erase(value.find_last_not_of(" \t\"") + 1);
-
-            if (found_key == key) {
-                closelog();
-                return value;
-            }
-        }
-    }
-    
     closelog();
-    return ""; // Key not found
+    return value;
 }
 
 std::string parse_principal_into_string(const krb5_principal principal) {
