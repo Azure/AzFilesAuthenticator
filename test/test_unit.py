@@ -734,6 +734,20 @@ class TestAzfilesSetOauth(unittest.TestCase):
 
         self.assertEqual(metadata["auth_mode"], "system")
 
+    def test_set_direct_token_persists_token_auth_mode(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with _temp_auth_state(mod):
+            mod.azfiles_set_oauth(
+                "https://myaccount.file.core.windows.net",
+                "tok-123",
+                auth_mode="token",
+            )
+            metadata = mod.get_endpoint_auth_metadata("https://myaccount.file.core.windows.net")
+
+        self.assertEqual(metadata["auth_mode"], "token")
+
     def test_set_conflict_raised_before_lib_call(self):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
@@ -1264,6 +1278,56 @@ class TestCLIArgParsing(unittest.TestCase):
         args = fake_lib.extern_smb_set_credential_oauth_token.call_args[0]
         self.assertEqual(args[0], b"https://account.file.core.windows.net")
         self.assertEqual(args[1], b"my-direct-token")
+
+    def test_set_direct_token_conflict_exits_before_touching_krb5_cache(self):
+        fake_lib = _make_fake_lib()
+        mod = _load_manager(fake_lib)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = os.path.join(temp_dir, "run", "azfilesauth")
+            state_file = os.path.join(state_dir, "endpoint-auth-state.json")
+
+            with mock.patch.dict(
+                mod.get_endpoint_auth_metadata.__globals__,
+                {
+                    "AUTH_STATE_DIR": state_dir,
+                    "AUTH_STATE_FILE_PATH": state_file,
+                },
+            ):
+                # Endpoint is already owned by a user-assigned identity.
+                mod.azfiles_set_oauth(
+                    "https://account.file.core.windows.net",
+                    "seed-token",
+                    auth_mode="user-assigned",
+                    client_id="alice-client-id",
+                )
+                fake_lib.extern_smb_set_credential_oauth_token.reset_mock()
+
+                config_data = "KRB5_CC_NAME: /tmp/krb5cc_test\nUSER_UID: 1000\n"
+                real_open = open
+                def _mock_open_fn(path, *a, **kw):
+                    if isinstance(path, str) and path == "/etc/azfilesauth/config.yaml":
+                        return mock.mock_open(read_data=config_data)()
+                    return real_open(path, *a, **kw)
+
+                with mock.patch("builtins.open", side_effect=_mock_open_fn):
+                    with mock.patch("os.system", return_value=0):
+                        with mock.patch("subprocess.check_output", return_value=b"1000"):
+                            with mock.patch("pwd.getpwuid", return_value=mock.MagicMock()):
+                                saved_argv = sys.argv
+                                try:
+                                    sys.argv = ["azfilesauthmanager", "set", "https://account.file.core.windows.net", "my-direct-token"]
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        mod.run_azfilesauthmanager()
+                                finally:
+                                    sys.argv = saved_argv
+
+                self.assertEqual(ctx.exception.code, 3)
+                fake_lib.extern_smb_set_credential_oauth_token.assert_not_called()
+
+                # Original owner's metadata must remain untouched.
+                metadata = mod.get_endpoint_auth_metadata("https://account.file.core.windows.net")
+                self.assertEqual(metadata["client_id"], "alice-client-id")
 
     def test_set_system_mi_conflict_exits_before_touching_krb5_cache(self):
         fake_lib = _make_fake_lib()

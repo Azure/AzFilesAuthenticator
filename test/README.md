@@ -85,6 +85,7 @@ Classes: `TestAzfilesSetOauth`, `TestAzfilesClear`, and `TestAzfilesList`
 - `test_set_calls_lib`: passes the endpoint and OAuth token to the native setter.
 - `test_set_nonzero_rc_exits`: exits when the native setter returns an error.
 - `test_set_persists_metadata_after_successful_lib_call`: confirms auth metadata is only written after the native credential-set call succeeds.
+- `test_set_direct_token_persists_token_auth_mode`: confirms a direct OAuth token set (no `--system`/`--imds-client-id`/`--workload-identity`) is persisted with `auth_mode="token"`.
 - `test_set_conflict_raised_before_lib_call`: confirms an identity conflict raises `AuthMetadataConflict` and the native setter is never called, so the krb5/keyring store is never touched for a rejected request.
 - `test_set_force_bypasses_conflict_and_overwrites_metadata`: confirms `force=True` skips the conflict check, still calls the native setter, and overwrites the endpoint's metadata with the new identity.
 - `test_clear_calls_lib`: calls the native credential-clear function.
@@ -152,6 +153,7 @@ Class: `TestCLIArgParsing`
 - `test_list_command_calls_lib`: routes `list` to the native list wrapper.
 - `test_clear_command_calls_lib`: routes `clear` to the native clear wrapper.
 - `test_set_direct_token`: routes a direct OAuth token to the native setter.
+- `test_set_direct_token_conflict_exits_before_touching_krb5_cache`: end-to-end CLI check that a direct-token `set` against an endpoint already owned by a different identity exits with code `3`, never calls the native credential setter, and leaves the original owner's metadata intact.
 - `test_set_system_mi_conflict_exits_before_touching_krb5_cache`: end-to-end CLI check that `set ... --system` against an endpoint already owned by a different identity exits with code `3`, never calls the native credential setter, and leaves the original owner's metadata intact.
 - `test_set_system_mi_force_overwrites_conflicting_metadata`: end-to-end CLI check that `set ... --system --force` against an endpoint already owned by a different identity succeeds, calls the native credential setter, and overwrites the metadata to reflect the new identity.
 

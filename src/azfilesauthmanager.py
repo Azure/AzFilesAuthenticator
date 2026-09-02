@@ -33,7 +33,7 @@ AUTH_STATE_FILE_PATH = f"{AUTH_STATE_DIR}/endpoint-auth-state.json"
 
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
-    azfilesauthmanager set <file_endpoint_uri> <oauth_token>
+    azfilesauthmanager set <file_endpoint_uri> <oauth_token> [--force]
     azfilesauthmanager set <file_endpoint_uri> --system [--force]
     azfilesauthmanager set <file_endpoint_uri> --imds-client-id <client_id> [--force]
     azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file> [--authority-host <authority_host>] [--resource <resource>] [--force]
@@ -625,7 +625,11 @@ def run_azfilesauthmanager():
                 print(USAGE_MESSAGE)
                 sys.exit(1)
             oauth_token = argv[3]
-            azfiles_set_oauth(file_endpoint_uri, oauth_token)
+            try:
+                azfiles_set_oauth(file_endpoint_uri, oauth_token, auth_mode="token", force=force)
+            except AuthMetadataConflict as e:
+                print(f"[-] Refusing to set credential: {e}")
+                sys.exit(3)
 
     elif command == "clear":
         if len(sys.argv) != 3:
