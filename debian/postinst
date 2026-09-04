@@ -3,6 +3,13 @@ set -e
 
 case "$1" in
     configure)
+        chown root:root /etc/azfilesauth
+        chmod 0755 /etc/azfilesauth
+        if [ -e /etc/azfilesauth/config.yaml ]; then
+            chown root:root /etc/azfilesauth/config.yaml
+            chmod 0644 /etc/azfilesauth/config.yaml
+        fi
+
         # Fallback: install Azure Python SDK via pip if not satisfied by package manager.
         # The preferred path is via packages.microsoft.com which provides
         # python3-azure-identity and python3-azure-core as native .deb packages.
@@ -23,6 +30,10 @@ case "$1" in
                     exit 1
                 fi
             fi
+        fi
+        if ! python3 -c "import azure.identity, azure.core, yaml" 2>/dev/null; then
+            echo "ERROR: azfilesauth Python dependencies are not importable after installation. Required: azure-identity, azure-core, and PyYAML." >&2
+            exit 1
         fi
         ;;
 esac

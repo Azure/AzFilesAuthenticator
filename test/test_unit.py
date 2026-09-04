@@ -20,6 +20,7 @@ import json
 import os
 import re
 import signal
+import stat
 import sys
 import tempfile
 import textwrap
@@ -172,19 +173,37 @@ class TestYamlConfig(unittest.TestCase):
                     "  MSI_ENDPOINT: http://localhost/token\n"
                     "KRB5_CC_NAME: FILE:/tmp/krb5cc_1000\n"
                 )
+            os.chmod(config_path, 0o666)
 
             with mock.patch.dict(
                 self.mod.load_config.__globals__,
                 {"CONFIG_FILE_PATH": config_path},
-            ):
+            ), mock.patch("os.chown") as mock_chown, mock.patch("os.chmod") as mock_chmod:
                 config = self.mod.load_config()
                 config["USER_UID"] = 1000
                 self.mod.save_config(config)
                 saved_config = self.mod.load_config()
+                saved_mode = stat.S_IMODE(os.stat(config_path).st_mode)
 
         self.assertEqual(saved_config["ENVIRONMENT"]["MSI_ENDPOINT"], "http://localhost/token")
         self.assertEqual(saved_config["KRB5_CC_NAME"], "FILE:/tmp/krb5cc_1000")
         self.assertEqual(saved_config["USER_UID"], 1000)
+        self.assertEqual(saved_mode, 0o666)
+        mock_chown.assert_not_called()
+        mock_chmod.assert_not_called()
+
+    def test_save_config_secures_new_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with mock.patch.dict(
+                self.mod.save_config.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ), mock.patch("os.geteuid", return_value=0), mock.patch("os.chown") as mock_chown:
+                self.mod.save_config({"USER_UID": 1000})
+                saved_mode = stat.S_IMODE(os.stat(config_path).st_mode)
+
+        self.assertEqual(saved_mode, 0o644)
+        mock_chown.assert_called_once_with(config_path, 0, 0)
 
     def test_init_new_user_preserves_existing_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -204,6 +223,24 @@ class TestYamlConfig(unittest.TestCase):
         self.assertEqual(user_uid, "1001")
         self.assertEqual(saved_config["ENVIRONMENT"]["MSI_SECRET"], "example-secret")
         self.assertEqual(saved_config["USER_UID"], 1001)
+
+    def test_init_new_user_exits_when_config_cannot_be_loaded(self):
+        mock_load = mock.MagicMock(side_effect=ValueError("configuration root must be a mapping"))
+        mock_save = mock.MagicMock()
+        with mock.patch.dict(
+            self.mod.init_new_user.__globals__,
+            {"load_config": mock_load, "save_config": mock_save},
+        ), mock.patch("os.system") as mock_system, mock.patch("builtins.print") as mock_print:
+            with self.assertRaises(SystemExit) as raised:
+                self.mod.init_new_user()
+
+        self.assertEqual(raised.exception.code, 1)
+        mock_system.assert_not_called()
+        mock_save.assert_not_called()
+        self.assertIn(
+            "Error reading the config file from /etc/azfilesauth/config.yaml: configuration root must be a mapping",
+            " ".join(" ".join(str(arg) for arg in call.args) for call in mock_print.call_args_list),
+        )
 
 
 # ===================================================================
@@ -529,6 +566,32 @@ class TestAzfilesList(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             mod.azfiles_list(False)
         self.assertEqual(ctx.exception.code, 2)
+
+
+# ===================================================================
+# Test: azfilesrefresh.py.in — environment configuration
+# ===================================================================
+
+class TestRefreshEnvironment(unittest.TestCase):
+
+    def test_invalid_timing_overrides_log_and_use_defaults(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AZFILES_REFRESH_SLEEP_SECONDS": "not-an-integer",
+                "AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS": "",
+            },
+        ), mock.patch("logging.error") as mock_log:
+            mod = _load_refresh()
+
+        self.assertEqual(mod.SLEEP_TIME, 60)
+        self.assertEqual(mod.REFRESH_BEFORE_EXPIRY, 300)
+        mock_log.assert_any_call(
+            "Invalid AZFILES_REFRESH_SLEEP_SECONDS: invalid literal for int() with base 10: 'not-an-integer'; using default 60"
+        )
+        mock_log.assert_any_call(
+            "Invalid AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS: invalid literal for int() with base 10: ''; using default 300"
+        )
 
 
 # ===================================================================
