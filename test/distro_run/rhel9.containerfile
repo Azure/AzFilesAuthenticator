@@ -3,7 +3,12 @@ FROM registry.access.redhat.com/ubi9/ubi:latest
 
 COPY *.rpm /tmp/
 
-RUN dnf -y install --allowerasing /tmp/azfilesauth-*.x86_64.rpm && \
+# cifs-utils/keyutils aren't published in the free UBI repos, so pull them
+# from the ABI-compatible CentOS Stream BaseOS mirror.
+RUN printf '[cs9-baseos]\nname=CentOS Stream 9 BaseOS\nbaseurl=https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/\ngpgcheck=0\nenabled=1\n' \
+        > /etc/yum.repos.d/centos-stream-baseos.repo && \
+    dnf -y install cifs-utils keyutils && \
+    dnf -y install --allowerasing /tmp/azfilesauth-*.x86_64.rpm && \
     dnf clean all
 
 # Validate

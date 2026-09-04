@@ -62,10 +62,16 @@ fi
 %{_includedir}/azfilesauthversion.h
 %{python3_sitelib}/azfilesauth/
 /etc/systemd/system/azfilesrefresh.service
-%config(noreplace) /etc/azfilesauth/config.yaml
+%attr(0644,root,root) %config(noreplace) /etc/azfilesauth/config.yaml
 
 %post
 %systemd_post azfilesrefresh.service
+chown root:root /etc/azfilesauth
+chmod 0755 /etc/azfilesauth
+if [ -e /etc/azfilesauth/config.yaml ]; then
+    chown root:root /etc/azfilesauth/config.yaml
+    chmod 0644 /etc/azfilesauth/config.yaml
+fi
 # Fallback: install Azure Python SDK via pip (set AZFILESAUTH_SKIP_PIP_INSTALL=1 to skip)
 if [ "${AZFILESAUTH_SKIP_PIP_INSTALL:-0}" -ne 1 ]; then
     if ! %{__python3} -c "import azure.identity, yaml" 2>/dev/null; then
@@ -82,6 +88,10 @@ else
         echo "ERROR: azfilesauth requires azure-identity, azure-core, and PyYAML to function. Install them manually or remove AZFILESAUTH_SKIP_PIP_INSTALL." >&2
         exit 1
     fi
+fi
+if ! %{__python3} -c "import azure.identity, azure.core, yaml" 2>/dev/null; then
+    echo "ERROR: azfilesauth Python dependencies are not importable after installation. Required: azure-identity, azure-core, and PyYAML." >&2
+    exit 1
 fi
 
 %preun

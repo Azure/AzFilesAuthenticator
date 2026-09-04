@@ -27,7 +27,16 @@ python3 test/test_unit.py
 python3 -m unittest discover -s test -p 'test_unit.py'
 ```
 
-The suite imports the Python sources with mocked native-library, Azure SDK, filesystem, subprocess, and logging dependencies. It currently contains 48 test methods.
+The suite imports the Python sources with mocked native-library, Azure SDK, filesystem, subprocess, and logging dependencies.
+
+### YAML configuration and local user initialization
+
+Class: `TestYamlConfig`
+
+- `test_config_round_trip_preserves_nested_mappings`: preserves existing nested configuration while adding `USER_UID`.
+- `test_save_config_secures_new_file`: creates a new config with mode `0644` and root ownership when running as root.
+- `test_init_new_user_preserves_existing_config`: records the local user UID without discarding existing settings.
+- `test_init_new_user_exits_when_config_cannot_be_loaded`: exits without creating a user or writing configuration when the config cannot be loaded.
 
 ### Azure managed-identity token acquisition
 
@@ -35,6 +44,7 @@ Class: `TestGetOauthToken`
 
 - `test_system_assigned_returns_token`: uses `ManagedIdentityCredential()` and returns a system-assigned token.
 - `test_user_assigned_passes_client_id`: passes the client ID to the user-assigned credential.
+- `test_loads_environment_before_managed_identity_credential`: loads configured Azure Identity environment variables before constructing the credential.
 - `test_empty_client_id_uses_system_assigned_identity`: treats an empty client ID as system-assigned authentication.
 - `test_missing_access_token_returns_none`: rejects a credential response with no token.
 - `test_request_failure_returns_none`: converts credential acquisition failures to `None`.
@@ -46,15 +56,10 @@ Class: `TestGetWorkloadIdentityToken`
 
 - `test_missing_params_returns_none`: rejects missing tenant ID, client ID, or token-file path.
 - `test_successful_token_fetch`: reads the assertion file, constructs `ClientAssertionCredential` with `func`, and requests the public Storage scope.
+- `test_loads_environment_before_client_assertion_credential`: loads configured Azure Identity environment variables before constructing the credential.
 - `test_default_authority_is_public`: verifies the default Microsoft Entra public-cloud authority.
 - `test_resource_is_used_as_base_uri`: verifies a trailing slash is normalized and `/.default` is appended exactly once.
 - `test_sovereign_authority_and_resource_override`: verifies custom authority and resource values for sovereign/custom clouds.
-
-### Runtime endpoint authentication state
-
-Class: `TestEndpointAuthMetadata`
-
-- `test_metadata_uses_runtime_state_file`: writes and reads endpoint metadata through the runtime JSON state path using an isolated temporary directory.
 
 ### Native-library wrappers
 
@@ -67,6 +72,12 @@ Classes: `TestAzfilesSetOauth`, `TestAzfilesClear`, and `TestAzfilesList`
 - `test_list_plain`: requests plain credential output.
 - `test_list_json`: requests JSON credential output.
 - `test_list_nonzero_rc_exits`: propagates a nonzero list return code.
+
+### Refresh daemon environment configuration
+
+Class: `TestRefreshEnvironment`
+
+- `test_invalid_timing_overrides_log_and_use_defaults`: logs malformed daemon timing overrides and retains the packaged defaults.
 
 ### Ticket expiry logic
 
@@ -96,7 +107,6 @@ Class: `TestRefreshTicket`
 
 - `test_refresh_uses_system_mi_for_root_username`: uses system-assigned managed identity for a root mount.
 - `test_refresh_uses_user_mi_for_client_id_username`: uses the mount username as the user-assigned client ID.
-- `test_refresh_uses_workload_identity_metadata_when_present`: reads persisted workload-identity metadata and refreshes with tenant, client, token-file, authority, and resource values.
 
 ### Epoch parsing
 
@@ -164,8 +174,8 @@ The script always tests system-assigned identity. It also tests user-assigned id
 
 - `scenario_authenticate`: clears credentials, sets the requested identity mode, and verifies CIFS credentials exist.
 - `scenario_mount`: mounts the share with Kerberos, writes and reads a probe file, then cleans up.
-- `scenario_expiry`: forces the daemon’s expiry check with environment overrides and verifies the ticket lifetime does not regress.
-- `scenario_daemon_refresh`: keeps a mount active while the daemon refreshes, then verifies post-refresh I/O and ticket lifetime.
+- `scenario_expiry`: forces the daemon’s expiry check with environment overrides, requires the target ticket’s start epoch to advance, and rejects an end-time regression.
+- `scenario_daemon_refresh`: keeps a mount active while the daemon refreshes, requires a newly issued target ticket, and verifies post-refresh I/O.
 
 This suite does not currently exercise workload identity federation. It requires a live Azure environment and root privileges.
 
@@ -202,9 +212,11 @@ For each selected distro (`ubuntu20`, `ubuntu22`, `ubuntu24`, `sles15`, `rhel9`,
 1. Builds the package using the matching `test/build/*.containerfile`.
 2. Extracts and checks that a package artifact exists.
 3. Installs it in a clean image using `test/distro_run/*.containerfile`.
-4. Runs `azfilesauthmanager --version` and requires nonempty output.
-5. Starts `azfilesrefresh` for five seconds and accepts timeout exit 124 or clean exit 0.
-6. Mounts `test/` and `src/` read-only into the distro image and runs `test_unit.py` with that distro’s Python.
+4. Requires `/etc/azfilesauth/config.yaml` to have mode `0644` and owner/group `root:root`.
+5. Requires `azure.identity`, `azure.core`, and `yaml` to import with the distro’s packaged Python.
+6. Runs `azfilesauthmanager --version` and requires nonempty output.
+7. Starts `azfilesrefresh` for five seconds and accepts timeout exit 124 or clean exit 0.
+8. Mounts `test/` and `src/` read-only into the distro image and runs `test_unit.py` with that distro’s Python.
 
 This is not run by `run_e2e_tests.sh` and is a separate manual/package CI test.
 

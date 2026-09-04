@@ -81,8 +81,17 @@ def save_config(config):
     if not isinstance(config, dict):
         raise ValueError("configuration root must be a mapping")
 
-    with open(CONFIG_FILE_PATH, "w") as config_file:
+    config_exists = os.path.exists(CONFIG_FILE_PATH)
+
+    def config_opener(path, flags):
+        return os.open(path, flags, 0o600)
+
+    with open(CONFIG_FILE_PATH, "w", opener=config_opener) as config_file:
         yaml.safe_dump(config, config_file, default_flow_style=False, sort_keys=False)
+    if not config_exists:
+        if os.geteuid() == 0:
+            os.chown(CONFIG_FILE_PATH, 0, 0)
+        os.chmod(CONFIG_FILE_PATH, 0o644)
 
 
 def ensure_azure_identity_dependencies():
@@ -148,9 +157,9 @@ def init_new_user():
                 return str(uid)
             except (KeyError, TypeError, ValueError):
                 print(f"User with UID {uid} does not exist.")
-    except Exception:
-        print(f"Either user {new_user} does not exist, or error reading the config file from {CONFIG_FILE_PATH}.")
-        config = {}
+    except Exception as e:
+        print(f"Error reading the config file from {CONFIG_FILE_PATH}: {e}")
+        sys.exit(1)
 
     # Check if the azfilesuser already exists
     if os.system(f"getent passwd {new_user} > /dev/null 2>&1") == 0:

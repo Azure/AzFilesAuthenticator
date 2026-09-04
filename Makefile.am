@@ -23,6 +23,8 @@ pymodule_PYTHON = src/azfilesauthmanager.py
 install-data-hook:
 	mkdir -p $(DESTDIR)$(pymoduledir)
 	echo "from .azfilesauthmanager import *" > $(DESTDIR)$(pymoduledir)/__init__.py
+	chmod 0755 $(DESTDIR)$(configdir)
+	chmod 0644 $(DESTDIR)$(configdir)/config.yaml
 
 # Create systemd service file
 systemddir = /etc/systemd/system

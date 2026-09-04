@@ -17,12 +17,6 @@ SLEEP_TIME = 60 * SECONDS
 REFRESH_BEFORE_EXPIRY = 5 * MINUTES 
 RUNNING = True
 
-# Test harnesses can override daemon timing without changing packaged defaults.
-SLEEP_TIME = int(os.getenv("AZFILES_REFRESH_SLEEP_SECONDS", str(SLEEP_TIME)))
-REFRESH_BEFORE_EXPIRY = int(
-    os.getenv("AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS", str(REFRESH_BEFORE_EXPIRY))
-)
-
 # Configure Logging
 logging.basicConfig(
     filename="/var/log/azfilesrefresh.log",
@@ -39,6 +33,17 @@ def log_error(message):
 
 def log_verbose(message):
     logging.debug(message)
+
+# Test harnesses can override daemon timing without changing packaged defaults.
+try:
+    SLEEP_TIME = int(os.getenv("AZFILES_REFRESH_SLEEP_SECONDS", SLEEP_TIME))
+except (TypeError, ValueError) as e:
+    log_error(f"Invalid AZFILES_REFRESH_SLEEP_SECONDS: {e}; using default {SLEEP_TIME}")
+
+try:
+    REFRESH_BEFORE_EXPIRY = int(os.getenv("AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS", REFRESH_BEFORE_EXPIRY))
+except (TypeError, ValueError) as e:
+    log_error(f"Invalid AZFILES_REFRESH_BEFORE_EXPIRY_SECONDS: {e}; using default {REFRESH_BEFORE_EXPIRY}")
 
 # Graceful shutdown handler
 def handle_shutdown(signum, frame):

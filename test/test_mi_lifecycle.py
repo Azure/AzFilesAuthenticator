@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -81,23 +82,44 @@ def list_cifs_credentials():
     return [c for c in payload if c.get("server", "").startswith("cifs")]
 
 
-def extract_ticket_epoch(cred):
-    if isinstance(cred.get("ticket_renew_till"), int):
-        return cred["ticket_renew_till"]
-
-    end_time = cred.get("ticket_end_time", "")
-    if end_time:
-        m = EPOCH_RE.search(end_time)
-        if m:
-            return int(m.group(1))
-
-    renew_till = cred.get("ticket_renew_till", "")
-    if isinstance(renew_till, str):
-        m = EPOCH_RE.search(renew_till)
-        if m:
-            return int(m.group(1))
-
+def extract_epoch(cred, field):
+    value = cred.get(field, "")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        match = EPOCH_RE.search(value)
+        if match:
+            return int(match.group(1))
     return 0
+
+
+def get_ticket_times(credentials, endpoint):
+    hostname = urlparse(endpoint).hostname
+    if not hostname:
+        raise RuntimeError(f"Could not parse endpoint hostname: {endpoint}")
+
+    server_prefix = f"cifs/{hostname}@"
+    matching_times = []
+    for credential in credentials:
+        if credential.get("server", "").startswith(server_prefix):
+            start_epoch = extract_epoch(credential, "ticket_start_time")
+            end_epoch = extract_epoch(credential, "ticket_end_time")
+            if start_epoch > 0 and end_epoch > 0:
+                matching_times.append((start_epoch, end_epoch))
+
+    if not matching_times:
+        raise RuntimeError(f"Could not find parseable ticket times for {hostname}")
+    return max(matching_times)
+
+
+def verify_ticket_refreshed(before_times, after_times):
+    before_start, before_end = before_times
+    after_start, after_end = after_times
+    if after_start <= before_start or after_end < before_end:
+        raise RuntimeError(
+            "Ticket was not refreshed: expected start time to advance and end time not to regress "
+            f"(before={before_times}, after={after_times})"
+        )
 
 
 def set_credential(endpoint, mode, user_mi_client_id):
@@ -191,9 +213,7 @@ def scenario_expiry(endpoint, storage_account, file_share, mount_base, mode, use
     creds_before = list_cifs_credentials()
     if not creds_before:
         raise RuntimeError("No CIFS credentials found after authentication")
-    before_epoch = max(extract_ticket_epoch(c) for c in creds_before)
-    if before_epoch == 0:
-        raise RuntimeError("Could not parse ticket end_time epoch before daemon run")
+    before_times = get_ticket_times(creds_before, endpoint)
 
     username = "root" if mode == "system" else user_mi_client_id
     mount_point = os.path.join(mount_base, f"{mode}_expiry")
@@ -230,15 +250,8 @@ def scenario_expiry(endpoint, storage_account, file_share, mount_base, mode, use
         creds_after = list_cifs_credentials()
         if not creds_after:
             raise RuntimeError("Credentials missing after daemon run")
-        after_epoch = max(extract_ticket_epoch(c) for c in creds_after)
-        if after_epoch == 0:
-            raise RuntimeError("Could not parse ticket end_time epoch after daemon run")
-
-        if after_epoch < before_epoch:
-            raise RuntimeError(
-                f"Ticket end_time regressed after daemon refresh "
-                f"(before={before_epoch}, after={after_epoch})"
-            )
+        after_times = get_ticket_times(creds_after, endpoint)
+        verify_ticket_refreshed(before_times, after_times)
     finally:
         manage_refresh_service("start")
         unmount_if_mounted(mount_point)
@@ -252,7 +265,7 @@ def scenario_daemon_refresh(endpoint, storage_account, file_share, mount_base, m
     if not creds_before:
         raise RuntimeError("No credentials present before daemon refresh")
 
-    before_epoch = max(extract_ticket_epoch(c) for c in creds_before)
+    before_times = get_ticket_times(creds_before, endpoint)
     username = "root" if mode == "system" else user_mi_client_id
     mount_point = os.path.join(mount_base, f"{mode}_daemon")
     os.makedirs(mount_point, exist_ok=True)
@@ -285,12 +298,8 @@ def scenario_daemon_refresh(endpoint, storage_account, file_share, mount_base, m
         creds_after = list_cifs_credentials()
         if not creds_after:
             raise RuntimeError("No credentials present after daemon refresh")
-        after_epoch = max(extract_ticket_epoch(c) for c in creds_after)
-
-        if before_epoch > 0 and after_epoch > 0 and after_epoch < before_epoch:
-            raise RuntimeError(
-                f"Ticket epoch regressed after daemon refresh ({after_epoch} < {before_epoch})"
-            )
+        after_times = get_ticket_times(creds_after, endpoint)
+        verify_ticket_refreshed(before_times, after_times)
 
         write_and_read_probe(mount_point, f"post-daemon-{mode}")
     finally:
