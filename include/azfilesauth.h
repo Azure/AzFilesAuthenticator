@@ -15,6 +15,7 @@
 #define KRB5_CLIENT_PRINCIPAL "AzureFileClient"         // Server-side hard coded client principal
 
 #define CONFIG_FILE_PATH "/etc/azfilesauth/config.yaml"
+#define AZFILESAUTH_SHARED_USER_NAME "azfilesuser"
 
 // Special USER_UID value: use the invoking (sudo) user's own credential cache
 // instead of a single shared user, so multiple identities can be stored for

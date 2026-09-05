@@ -226,6 +226,24 @@ for distro in "${DISTROS[@]}"; do
         results+=("FAIL  $distro  unit-tests")
     fi
     rm -f "$unit_log"
+
+    # --- Step 9: Run native USER_UID resolution test ---
+    log "[$distro] Running local USER_UID resolution test..."
+    local_uid_log=$(mktemp)
+    if docker run --rm \
+        -v "$REPO_ROOT/test:/tests:ro" \
+        "$run_tag" \
+        bash /tests/test_local_user_uid.sh 2>&1 | tee "$local_uid_log" | tail -5; then
+        pass "[$distro] Local USER_UID resolution test passed"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  local-user-uid")
+    else
+        tail -20 "$local_uid_log"
+        fail "[$distro] Local USER_UID resolution test failed"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  local-user-uid")
+    fi
+    rm -f "$local_uid_log"
 done
 
 # --- Summary ---
