@@ -9,7 +9,6 @@ libazfilesauth_la_CPPFLAGS = -Iinclude
 
 # Install configuration file
 configdir = /etc/azfilesauth
-config_DATA = config/config.yaml
 
 # Python Script Installation
 bindir = $(prefix)/bin
@@ -23,8 +22,10 @@ pymodule_PYTHON = src/azfilesauthmanager.py
 install-data-hook:
 	mkdir -p $(DESTDIR)$(pymoduledir)
 	echo "from .azfilesauthmanager import *" > $(DESTDIR)$(pymoduledir)/__init__.py
-	chmod 0755 $(DESTDIR)$(configdir)
-	chmod 0644 $(DESTDIR)$(configdir)/config.yaml
+	mkdir -p $(DESTDIR)$(configdir)
+	if test ! -e $(DESTDIR)$(configdir)/config.yaml; then \
+		$(INSTALL) -m 0600 config/config.yaml $(DESTDIR)$(configdir)/config.yaml; \
+	fi
 
 # Create systemd service file
 systemddir = /etc/systemd/system
@@ -39,7 +40,7 @@ azfilesrefresh: src/azfilesrefresh.py
 	cp $< $@
 	chmod +x $@
 
-EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service
+EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service config/config.yaml
 CLEANFILES = azfilesauthmanager azfilesrefresh
 
 # ensure only one instance of service is running

@@ -41,7 +41,7 @@ sed -i "1c#!%{__python3}" %{buildroot}%{_bindir}/azfilesauthmanager %{buildroot}
 
 # Ensure the config directory is created
 mkdir -p %{buildroot}/etc/azfilesauth
-install -m 644 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
+install -m 600 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
 
 # Ensure the license directory exists and install LICENSE
 mkdir -p %{buildroot}%{_licensedir}/%{name}
@@ -62,16 +62,12 @@ fi
 %{_includedir}/azfilesauthversion.h
 %{python3_sitelib}/azfilesauth/
 /etc/systemd/system/azfilesrefresh.service
-%attr(0644,root,root) %config(noreplace) /etc/azfilesauth/config.yaml
+%attr(0600,root,root) %config(noreplace) /etc/azfilesauth/config.yaml
 
 %post
 %systemd_post azfilesrefresh.service
 chown root:root /etc/azfilesauth
 chmod 0755 /etc/azfilesauth
-if [ -e /etc/azfilesauth/config.yaml ]; then
-    chown root:root /etc/azfilesauth/config.yaml
-    chmod 0644 /etc/azfilesauth/config.yaml
-fi
 # Fallback: install Azure Python SDK via pip (set AZFILESAUTH_SKIP_PIP_INSTALL=1 to skip)
 if [ "${AZFILESAUTH_SKIP_PIP_INSTALL:-0}" -ne 1 ]; then
     if ! %{__python3} -c "import azure.identity, yaml" 2>/dev/null; then
