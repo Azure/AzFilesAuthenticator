@@ -30,6 +30,9 @@ except ImportError as e:
 CONFIG_FILE_PATH = "/etc/azfilesauth/config.yaml"
 AUTH_STATE_DIR = "/run/azfilesauth"
 AUTH_STATE_FILE_PATH = f"{AUTH_STATE_DIR}/endpoint-auth-state.json"
+# Special USER_UID value (must match USER_UID_LOCAL_SENTINEL in azfilesauth.h):
+# use the invoking user's own credential cache instead of a single shared user.
+USER_UID_LOCAL_SENTINEL = "local"
 
 USAGE_MESSAGE = """Usage:
     azfilesauthmanager list [--json]
@@ -152,6 +155,9 @@ def init_new_user():
     try:
         config = load_config()
         uid = config.get("USER_UID")
+        if isinstance(uid, str) and uid.strip().lower() == USER_UID_LOCAL_SENTINEL:
+            # No shared user needed: each invoking user gets their own ccache.
+            return USER_UID_LOCAL_SENTINEL
         if uid is not None:
             try:
                 pwd.getpwuid(int(uid))
@@ -491,7 +497,7 @@ def run_azfilesauthmanager():
         print(v.decode() if isinstance(v, (bytes, bytearray)) else v)
         sys.exit(0)
 
-    user_id = int(init_new_user())
+    init_new_user()
 
     if command == "list":
         if len(sys.argv) != 2 and len(sys.argv) != 3:
