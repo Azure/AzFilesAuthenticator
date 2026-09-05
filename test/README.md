@@ -11,7 +11,7 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 | `test_mi_lifecycle.py` | `RUN_MI_LIFECYCLE_TESTS=1 ./test/run_e2e_tests.sh` | No; opt-in | Root, installed package, Azure identity, CIFS, Kerberos, Azure resources |
 | `tests.py` | `./test/run_e2e_tests.sh` when `test/test_config.yaml` exists | No; conditional legacy path | Root, `requests`, client-secret config, mounted Azure Files share |
 | `test_package_builds.sh` | `./test/test_package_builds.sh [distros...]` | No; manual | Docker and supported distro images |
-| `test_local_user_uid.sh` | `./test/test_local_user_uid.sh` | No; manual | Docker (`test/build/` + `test/distro_run/` ubuntu24 images) |
+| `test_local_user_uid.sh` | Invoked by `test_package_builds.sh`; also runnable directly | Yes in package-container validation | Root, installed package, writable `/etc/azfilesauth/config.yaml` |
 | `test_open_handles.sh` | Called by the disabled stress-test code in `tests.py` | No direct invocation | Mounted share, `sudo`, `dd`, write capacity |
 | `test_signing_sort.sh` | No caller | No | Empty file; currently contains no test |
 | `list_cred_op` | Fixture/sample JSON | Not a test | None |
@@ -28,7 +28,7 @@ python3 test/test_unit.py
 python3 -m unittest discover -s test -p 'test_unit.py'
 ```
 
-The suite imports the Python sources with mocked native-library, Azure SDK, filesystem, subprocess, and logging dependencies. It currently contains 69 test methods.
+The suite imports the Python sources with mocked native-library, Azure SDK, filesystem, subprocess, and logging dependencies.
 
 ### YAML configuration and local user initialization
 
@@ -42,6 +42,7 @@ Class: `TestYamlConfig`
 - `test_init_new_user_exits_when_config_cannot_be_loaded`: exits without creating a user or writing configuration when the config cannot be loaded.
 - `test_init_new_user_skips_user_creation_for_local_sentinel`: when `USER_UID: local` is already configured, `init_new_user()` skips shared-user lookup/creation and leaves the sentinel unchanged.
 - `test_init_new_user_local_sentinel_is_case_insensitive`: recognizes mixed-case values such as `USER_UID: Local` as the local-user sentinel.
+- Automatic `azfilesuser` discovery is not persisted: an existing or newly created shared account leaves `USER_UID` absent unless the operator explicitly configures it.
 
 ### Azure Identity environment configuration
 
@@ -257,15 +258,14 @@ This is not run by `run_e2e_tests.sh` and is a separate manual/package CI test.
 
 ## USER_UID: local sentinel: `test_local_user_uid.sh`
 
-Run with Docker (no Azure credentials required):
+Run directly in an environment with the package installed (no Azure credentials or managed identity required):
 
 ```bash
 ./test/test_local_user_uid.sh
 ```
 
-Builds the real package via `test/build/ubuntu24.containerfile` and installs it via
-`test/distro_run/ubuntu24.containerfile`, then verifies against the actual compiled
-native library (with `LOG_DESTINATION: file` enabled so ccache resolution is
+Verifies the already-installed package and actual compiled native library (with
+`LOG_DESTINATION: file` enabled so ccache resolution is
 observable) that when `USER_UID` is set to the special sentinel value `local`:
 
 - `init_new_user()` does not create or require a shared `azfilesuser`.
@@ -278,9 +278,10 @@ observable) that when `USER_UID` is set to the special sentinel value `local`:
 - When not invoked via `sudo` (`SUDO_UID` unset), it falls back to the real UID.
 - The `local` sentinel itself is never overwritten in `config.yaml`.
 
-It does not require real Azure credentials or an actual Kerberos ticket: it only
-asserts which ccache UID the native library resolves to for each invocation, not
-that a real ticket gets stored.
+It also verifies the default shared-account mode: with an existing `azfilesuser`
+and no `USER_UID` key, the native library resolves that account's UID and the
+configuration remains unchanged. It does not require real Azure credentials or
+an actual Kerberos ticket; it only asserts ccache resolution, not ticket storage.
 
 ## Shell Helper: `test_open_handles.sh`
 

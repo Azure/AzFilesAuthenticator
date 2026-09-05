@@ -17,6 +17,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <pwd.h>
+#include <limits>
 
 
 // ---- Lightweight logging wrapper ----
@@ -263,6 +265,24 @@ static uid_t resolve_local_invoking_uid() {
     return getuid();
 }
 
+static bool resolve_shared_user_uid(uid_t& out_uid) {
+    long buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if (buffer_size < 0) {
+        buffer_size = 16 * 1024;
+    }
+
+    std::vector<char> buffer(static_cast<size_t>(buffer_size));
+    struct passwd passwd_entry;
+    struct passwd* result = nullptr;
+    int rc = getpwnam_r(AZFILESAUTH_SHARED_USER_NAME, &passwd_entry, buffer.data(), buffer.size(), &result);
+    if (rc != 0 || result == nullptr) {
+        return false;
+    }
+
+    out_uid = result->pw_uid;
+    return true;
+}
+
 // Resolves the configured USER_UID value (a numeric UID, or the "local" sentinel) to an
 // effective UID. Returns false if user_uid_str is neither.
 static bool resolve_configured_uid(const std::string& user_uid_str, uid_t& out_uid, bool& out_is_local) {
@@ -270,6 +290,9 @@ static bool resolve_configured_uid(const std::string& user_uid_str, uid_t& out_u
     if (out_is_local) {
         out_uid = resolve_local_invoking_uid();
         return true;
+    }
+    if (user_uid_str.empty()) {
+        return resolve_shared_user_uid(out_uid);
     }
     try {
         size_t consumed = 0;
@@ -1128,15 +1151,10 @@ int extern_smb_set_credential_oauth_token(char* file_endpoint_uri,
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
     std::string user_uid_str = read_config_value("USER_UID");
-    if (user_uid_str.empty()) {
-        syslog(LOG_ERR, "Failed to read USER_UID from config file at %s", CONFIG_FILE_PATH);
-        return -1;
-    }
-
     uid_t user_uid;
     bool is_local = false;
     if (!resolve_configured_uid(user_uid_str, user_uid, is_local)) {
-        syslog(LOG_ERR, "Invalid USER_UID value in config file: %s", user_uid_str.c_str());
+        syslog(LOG_ERR, "Unable to resolve USER_UID='%s' or shared user %s", user_uid_str.c_str(), AZFILESAUTH_SHARED_USER_NAME);
         return -1;
     }
     uid_t prev_uid = geteuid();
@@ -1156,17 +1174,11 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
     
     std::string user_uid_str = read_config_value("USER_UID");
-    if (user_uid_str.empty()) {
-        syslog(LOG_ERR, "Failed to read USER_UID from config file at %s", CONFIG_FILE_PATH);
-        printf("Failed to read USER_UID from config file at %s\n", CONFIG_FILE_PATH);
-        return -1;
-    }
-
     uid_t user_uid;
     bool is_local = false;
     if (!resolve_configured_uid(user_uid_str, user_uid, is_local)) {
-        syslog(LOG_ERR, "Invalid USER_UID value in config file: %s", user_uid_str.c_str());
-        printf("Invalid USER_UID value in config file: %s\n", user_uid_str.c_str());
+        syslog(LOG_ERR, "Unable to resolve USER_UID='%s' or shared user %s", user_uid_str.c_str(), AZFILESAUTH_SHARED_USER_NAME);
+        printf("Unable to resolve USER_UID='%s' or shared user %s\n", user_uid_str.c_str(), AZFILESAUTH_SHARED_USER_NAME);
         return -1;
     }
     uid_t prev_uid = geteuid();
@@ -1193,17 +1205,11 @@ int extern_smb_list_credential(bool is_json) {
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
     std::string user_uid_str = read_config_value("USER_UID");
-    if (user_uid_str.empty()) {
-        syslog(LOG_ERR, "Failed to read USER_UID from config file at %s", CONFIG_FILE_PATH);
-        printf("Failed to read USER_UID from config file at %s\n", CONFIG_FILE_PATH);
-        return -1;
-    }
-
     uid_t user_uid;
     bool is_local = false;
     if (!resolve_configured_uid(user_uid_str, user_uid, is_local)) {
-        syslog(LOG_ERR, "Invalid USER_UID value in config file: %s", user_uid_str.c_str());
-        printf("Invalid USER_UID value in config file: %s\n", user_uid_str.c_str());
+        syslog(LOG_ERR, "Unable to resolve USER_UID='%s' or shared user %s", user_uid_str.c_str(), AZFILESAUTH_SHARED_USER_NAME);
+        printf("Unable to resolve USER_UID='%s' or shared user %s\n", user_uid_str.c_str(), AZFILESAUTH_SHARED_USER_NAME);
         return -1;
     }
     uid_t prev_uid = geteuid();

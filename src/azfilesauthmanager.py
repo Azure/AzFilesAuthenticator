@@ -190,13 +190,6 @@ def init_new_user():
         new_user_uid = subprocess.check_output(f"id -u {new_user}", shell=True).decode().strip()
         print(f"New user {new_user} created with UID: {new_user_uid}")
 
-    try:
-        config["USER_UID"] = int(new_user_uid)
-        save_config(config)
-    except Exception:
-        print(f"Error writing the config file at {CONFIG_FILE_PATH}")
-        sys.exit(1)
-
     return new_user_uid
 
 

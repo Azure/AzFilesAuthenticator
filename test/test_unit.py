@@ -275,7 +275,24 @@ class TestYamlConfig(unittest.TestCase):
 
         self.assertEqual(user_uid, "1001")
         self.assertEqual(saved_config["ENVIRONMENT"]["MSI_SECRET"], "example-secret")
-        self.assertEqual(saved_config["USER_UID"], 1001)
+        self.assertNotIn("USER_UID", saved_config)
+
+    def test_init_new_user_does_not_persist_existing_account_uid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w") as config_file:
+                config_file.write("ENVIRONMENT:\n  MSI_SECRET: example-secret\n")
+
+            with mock.patch.dict(
+                self.mod.init_new_user.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ), mock.patch("os.system", return_value=0), mock.patch(
+                "subprocess.check_output", return_value=b"1001"
+            ), mock.patch.object(self.mod, "save_config") as mock_save:
+                user_uid = self.mod.init_new_user()
+
+        self.assertEqual(user_uid, "1001")
+        mock_save.assert_not_called()
 
     def test_init_new_user_exits_when_config_cannot_be_loaded(self):
         mock_load = mock.MagicMock(side_effect=ValueError("configuration root must be a mapping"))
