@@ -161,7 +161,7 @@ while mount | grep "$MOUNT_BASE" > /dev/null; do
     MOUNTS=$(mount | grep "$MOUNT_BASE" | awk '{print $3}')
     for mount_point in $MOUNTS; do
         print_info "Unmounting $mount_point..."
-        umount "$mount_point" || true
+        umount "$mount_point"
     done
 done
 print_success "Test mount cleanup complete"
