@@ -148,13 +148,13 @@ def unmount_if_mounted(mount_point):
         result = run_cmd(["mount"], check=False)
         if mount_point not in (result.stdout or ""):
             return
-        run_cmd(["umount", mount_point], check=False)
+        run_cmd(["umount", mount_point], check=True)
         time.sleep(1)
 
 
 def manage_refresh_service(action):
     if shutil.which("systemctl"):
-        run_cmd(["systemctl", action, "azfilesrefresh"], check=False)
+        run_cmd(["systemctl", action, "azfilesrefresh"], check=True)
 
 
 def write_and_read_probe(mount_point, tag):
