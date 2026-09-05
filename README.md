@@ -358,7 +358,7 @@ ENVIRONMENT:
 
 The configuration is parsed with PyYAML's safe loader and is not executed as shell code. Variable names are case-sensitive, and values are converted to strings without shell expansion. Quote values when YAML might otherwise interpret their type, such as `"true"`, `"123"`, or `"null"`.
 
-The mapping is loaded immediately before each `ManagedIdentityCredential` or `ClientAssertionCredential` is created. This includes token renewal by the `azfilesrefresh` daemon, so no service-level environment configuration is required. Values in the mapping override variables inherited by the process, and changes take effect on the next token request.
+The mapping is loaded immediately before each `ManagedIdentityCredential` or `ClientAssertionCredential` is created. This includes token renewal by the `azfilesrefresh` daemon, so no service-level environment configuration is required. Values in the mapping override variables inherited by the process, and added or changed values take effect on the next token request. Removing a key from the mapping does not unset it in an already-running refresh daemon; restart the daemon after removing a variable from the configuration.
 
 The daemon runs as root. Restrict the configuration file to root, especially when it contains secrets:
 
@@ -508,7 +508,7 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
 
   # Ensure the config directory is created
   mkdir -p %{buildroot}/etc/azfilesauth
-  install -m 644 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
+  install -m 600 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
 
   # Ensure the license directory exists and install LICENSE
   mkdir -p %{buildroot}%{_licensedir}/%{name}

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+
+sys.path.insert(0, "@PYTHON_SITE_PKG@")
+
 from azfilesauth import azfiles_set_oauth, get_oauth_token, init_new_user
 import subprocess
 import os
@@ -36,7 +40,10 @@ def log_verbose(message):
 
 # Test harnesses can override daemon timing without changing packaged defaults.
 try:
-    SLEEP_TIME = int(os.getenv("AZFILES_REFRESH_SLEEP_SECONDS", SLEEP_TIME))
+    sleep_time = int(os.getenv("AZFILES_REFRESH_SLEEP_SECONDS", SLEEP_TIME))
+    if sleep_time < 5:
+        raise ValueError("value must be at least 5 seconds")
+    SLEEP_TIME = sleep_time
 except (TypeError, ValueError) as e:
     log_error(f"Invalid AZFILES_REFRESH_SLEEP_SECONDS: {e}; using default {SLEEP_TIME}")
 

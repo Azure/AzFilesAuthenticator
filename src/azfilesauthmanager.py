@@ -69,7 +69,9 @@ def load_config():
         raise RuntimeError("PyYAML is required to read the configuration")
 
     with open(CONFIG_FILE_PATH, "r") as config_file:
-        config = yaml.safe_load(config_file) or {}
+        config = yaml.safe_load(config_file)
+    if config is None:
+        config = {}
     if not isinstance(config, dict):
         raise ValueError("configuration root must be a mapping")
     return config
@@ -81,17 +83,11 @@ def save_config(config):
     if not isinstance(config, dict):
         raise ValueError("configuration root must be a mapping")
 
-    config_exists = os.path.exists(CONFIG_FILE_PATH)
-
     def config_opener(path, flags):
         return os.open(path, flags, 0o600)
 
     with open(CONFIG_FILE_PATH, "w", opener=config_opener) as config_file:
         yaml.safe_dump(config, config_file, default_flow_style=False, sort_keys=False)
-    if not config_exists:
-        if os.geteuid() == 0:
-            os.chown(CONFIG_FILE_PATH, 0, 0)
-        os.chmod(CONFIG_FILE_PATH, 0o644)
 
 
 def ensure_azure_identity_dependencies():
@@ -250,7 +246,11 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
     # Sovereign clouds (e.g. Mooncake, US Gov) pass a cloud-specific authority host.
     # The resource is the base URI without the `/.default` scope suffix. This
     # matches the Azure Files CSI driver's resource configuration.
-    authority = (authority_host or "https://login.microsoftonline.com").rstrip("/")
+    authority = (
+        authority_host
+        or os.environ.get("AZURE_AUTHORITY_HOST")
+        or "https://login.microsoftonline.com"
+    ).rstrip("/")
     storage_resource = (resource or "https://storage.azure.com").rstrip("/")
 
     try:

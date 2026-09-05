@@ -34,9 +34,18 @@ The suite imports the Python sources with mocked native-library, Azure SDK, file
 Class: `TestYamlConfig`
 
 - `test_config_round_trip_preserves_nested_mappings`: preserves existing nested configuration while adding `USER_UID`.
-- `test_save_config_secures_new_file`: creates a new config with mode `0644` and root ownership when running as root.
+- `test_save_config_secures_new_file`: creates a new config with mode `0600` without changing its ownership or mode after creation.
+- `test_load_config_treats_empty_document_as_empty_mapping`: treats an empty YAML document as an empty mapping.
+- `test_load_config_rejects_falsy_non_mapping_roots`: rejects lists, booleans, and numbers as configuration roots.
 - `test_init_new_user_preserves_existing_config`: records the local user UID without discarding existing settings.
 - `test_init_new_user_exits_when_config_cannot_be_loaded`: exits without creating a user or writing configuration when the config cannot be loaded.
+
+### Azure Identity environment configuration
+
+Class: `TestAzureIdentityEnvironment`
+
+- `test_reload_restores_inherited_values_and_removes_config_only_values`: removes stale configured values and restores inherited values when keys disappear.
+- `test_invalid_reload_does_not_partially_mutate_environment`: rejects an invalid mapping without partially changing the process environment.
 
 ### Azure managed-identity token acquisition
 
@@ -56,7 +65,7 @@ Class: `TestGetWorkloadIdentityToken`
 
 - `test_missing_params_returns_none`: rejects missing tenant ID, client ID, or token-file path.
 - `test_successful_token_fetch`: reads the assertion file, constructs `ClientAssertionCredential` with `func`, and requests the public Storage scope.
-- `test_loads_environment_before_client_assertion_credential`: loads configured Azure Identity environment variables before constructing the credential.
+- `test_loads_environment_before_client_assertion_credential`: loads and uses the configured authority before constructing the credential.
 - `test_default_authority_is_public`: verifies the default Microsoft Entra public-cloud authority.
 - `test_resource_is_used_as_base_uri`: verifies a trailing slash is normalized and `/.default` is appended exactly once.
 - `test_sovereign_authority_and_resource_override`: verifies custom authority and resource values for sovereign/custom clouds.
@@ -77,6 +86,8 @@ Classes: `TestAzfilesSetOauth`, `TestAzfilesClear`, and `TestAzfilesList`
 
 Class: `TestRefreshEnvironment`
 
+- `test_valid_sleep_overrides_at_or_above_minimum`: accepts refresh sleep intervals of at least five seconds.
+- `test_sleep_overrides_below_minimum_use_default`: rejects shorter intervals and retains the packaged default.
 - `test_invalid_timing_overrides_log_and_use_defaults`: logs malformed daemon timing overrides and retains the packaged defaults.
 
 ### Ticket expiry logic
@@ -145,12 +156,13 @@ Run with:
 python3 test/test_imports.py
 ```
 
-The file contains 7 test methods:
+The file contains the following test methods:
 
 - `test_azfilesrefresh_syntax`: parses the autoconf template for the refresh daemon.
 - `test_azfilesauthmanager_syntax`: parses the manager source.
 - `test_config_syntax`: parses `src/config.py` if that optional file exists; it is skipped by the implementation when absent.
 - `test_azfilesrefresh_imports_from_azfilesauth`: verifies every refresh-daemon import exists in the manager module.
+- `test_azfilesrefresh_adds_configured_package_path_before_import`: verifies the configured Python package path is added before importing `azfilesauth`.
 - `test_azfilesrefresh_no_undefined`: checks for potentially undefined names in the refresh daemon.
 - `test_azfilesauthmanager_no_undefined`: checks for potentially undefined names in the manager.
 - `test_all_refresh_dependencies_available`: verifies the package export pattern supplies everything imported by the daemon.
@@ -212,7 +224,7 @@ For each selected distro (`ubuntu20`, `ubuntu22`, `ubuntu24`, `sles15`, `rhel9`,
 1. Builds the package using the matching `test/build/*.containerfile`.
 2. Extracts and checks that a package artifact exists.
 3. Installs it in a clean image using `test/distro_run/*.containerfile`.
-4. Requires `/etc/azfilesauth/config.yaml` to have mode `0644` and owner/group `root:root`.
+4. Requires `/etc/azfilesauth/config.yaml` to have mode `0600` and owner/group `root:root`.
 5. Requires `azure.identity`, `azure.core`, and `yaml` to import with the distro’s packaged Python.
 6. Runs `azfilesauthmanager --version` and requires nonempty output.
 7. Starts `azfilesrefresh` for five seconds and accepts timeout exit 124 or clean exit 0.

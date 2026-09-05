@@ -198,12 +198,41 @@ class TestYamlConfig(unittest.TestCase):
             with mock.patch.dict(
                 self.mod.save_config.__globals__,
                 {"CONFIG_FILE_PATH": config_path},
-            ), mock.patch("os.geteuid", return_value=0), mock.patch("os.chown") as mock_chown:
+            ), mock.patch("os.chown") as mock_chown, mock.patch("os.chmod") as mock_chmod:
                 self.mod.save_config({"USER_UID": 1000})
                 saved_mode = stat.S_IMODE(os.stat(config_path).st_mode)
 
-        self.assertEqual(saved_mode, 0o644)
-        mock_chown.assert_called_once_with(config_path, 0, 0)
+        self.assertEqual(saved_mode, 0o600)
+        mock_chown.assert_not_called()
+        mock_chmod.assert_not_called()
+
+    def test_load_config_treats_empty_document_as_empty_mapping(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w"):
+                pass
+
+            with mock.patch.dict(
+                self.mod.load_config.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ):
+                config = self.mod.load_config()
+
+        self.assertEqual(config, {})
+
+    def test_load_config_rejects_falsy_non_mapping_roots(self):
+        for document in ("[]\n", "false\n", "0\n"):
+            with self.subTest(document=document), tempfile.TemporaryDirectory() as temp_dir:
+                config_path = os.path.join(temp_dir, "config.yaml")
+                with open(config_path, "w") as config_file:
+                    config_file.write(document)
+
+                with mock.patch.dict(
+                    self.mod.load_config.__globals__,
+                    {"CONFIG_FILE_PATH": config_path},
+                ):
+                    with self.assertRaisesRegex(ValueError, "configuration root must be a mapping"):
+                        self.mod.load_config()
 
     def test_init_new_user_preserves_existing_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -241,6 +270,47 @@ class TestYamlConfig(unittest.TestCase):
             "Error reading the config file from /etc/azfilesauth/config.yaml: configuration root must be a mapping",
             " ".join(" ".join(str(arg) for arg in call.args) for call in mock_print.call_args_list),
         )
+
+
+# ===================================================================
+# Test: azfilesauthmanager.py — Azure Identity environment
+# ===================================================================
+
+class TestAzureIdentityEnvironment(unittest.TestCase):
+
+    def setUp(self):
+        self.mod = _load_manager()
+
+    def test_reload_overwrites_configured_values_without_unsetting_removed_keys(self):
+        configs = [
+            {"ENVIRONMENT": {"CONFIGURED": "first", "REMOVED": "retained"}},
+            {"ENVIRONMENT": {"CURRENT": "second"}},
+        ]
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.dict(
+            self.mod.load_azure_identity_environment.__globals__,
+            {"load_config": mock.MagicMock(side_effect=configs)},
+        ):
+            self.assertTrue(self.mod.load_azure_identity_environment())
+            self.assertEqual(os.environ["CONFIGURED"], "first")
+            self.assertEqual(os.environ["REMOVED"], "retained")
+
+            self.assertTrue(self.mod.load_azure_identity_environment())
+            self.assertEqual(os.environ["REMOVED"], "retained")
+            self.assertEqual(os.environ["CURRENT"], "second")
+
+    def test_invalid_reload_retains_values_applied_before_the_error(self):
+        configs = [
+            {"ENVIRONMENT": {"VALID": "first"}},
+            {"ENVIRONMENT": {"VALID": "second", "INVALID": ["not", "scalar"]}},
+        ]
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.dict(
+            self.mod.load_azure_identity_environment.__globals__,
+            {"load_config": mock.MagicMock(side_effect=configs)},
+        ):
+            self.assertTrue(self.mod.load_azure_identity_environment())
+            self.assertFalse(self.mod.load_azure_identity_environment())
+            self.assertEqual(os.environ["VALID"], "second")
+            self.assertNotIn("INVALID", os.environ)
 
 
 # ===================================================================
@@ -414,6 +484,7 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
 
             def create_credential(**kwargs):
                 self.assertEqual(os.environ["AZURE_AUTHORITY_HOST"], "https://login.example.test")
+                self.assertEqual(kwargs["authority"], "https://login.example.test")
                 return credential
 
             with mock.patch.dict(os.environ, {}, clear=True):
@@ -436,14 +507,15 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         credential.get_token.return_value = token_response
 
         mock_cred = mock.MagicMock(return_value=credential)
-        with mock.patch.dict(
-            self.mod.get_workload_identity_token.__globals__,
-            {
-                "ClientAssertionCredential": mock_cred,
-                "load_azure_identity_environment": mock.MagicMock(return_value=True),
-            },
-        ):
-            self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(
+                self.mod.get_workload_identity_token.__globals__,
+                {
+                    "ClientAssertionCredential": mock_cred,
+                    "load_azure_identity_environment": mock.MagicMock(return_value=True),
+                },
+            ):
+                self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
 
         kwargs = mock_cred.call_args.kwargs
         self.assertEqual(kwargs["authority"], "https://login.microsoftonline.com")
@@ -479,19 +551,20 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
         credential.get_token.return_value = token_response
 
         mock_cred = mock.MagicMock(return_value=credential)
-        with mock.patch.dict(
-            self.mod.get_workload_identity_token.__globals__,
-            {
-                "ClientAssertionCredential": mock_cred,
-                "load_azure_identity_environment": mock.MagicMock(return_value=True),
-            },
-        ):
-            # Mooncake (Azure China) authority host; trailing slash must be normalized.
-            self.mod.get_workload_identity_token(
-                "tenant-1", "client-1", "/tok",
-                authority_host="https://login.chinacloudapi.cn/",
-                resource="https://storage.sovereign.example/",
-            )
+        with mock.patch.dict(os.environ, {"AZURE_AUTHORITY_HOST": "https://ignored.example"}, clear=True):
+            with mock.patch.dict(
+                self.mod.get_workload_identity_token.__globals__,
+                {
+                    "ClientAssertionCredential": mock_cred,
+                    "load_azure_identity_environment": mock.MagicMock(return_value=True),
+                },
+            ):
+                # Mooncake (Azure China) authority host; trailing slash must be normalized.
+                self.mod.get_workload_identity_token(
+                    "tenant-1", "client-1", "/tok",
+                    authority_host="https://login.chinacloudapi.cn/",
+                    resource="https://storage.sovereign.example/",
+                )
 
         kwargs = mock_cred.call_args.kwargs
         self.assertEqual(kwargs["authority"], "https://login.chinacloudapi.cn")
@@ -573,6 +646,30 @@ class TestAzfilesList(unittest.TestCase):
 # ===================================================================
 
 class TestRefreshEnvironment(unittest.TestCase):
+
+    def test_valid_sleep_overrides_at_or_above_minimum(self):
+        for value in ("5", "30"):
+            with self.subTest(value=value), mock.patch.dict(
+                os.environ,
+                {"AZFILES_REFRESH_SLEEP_SECONDS": value},
+            ), mock.patch("logging.error") as mock_log:
+                mod = _load_refresh()
+
+            self.assertEqual(mod.SLEEP_TIME, int(value))
+            mock_log.assert_not_called()
+
+    def test_sleep_overrides_below_minimum_use_default(self):
+        for value in ("-1", "0", "1", "4"):
+            with self.subTest(value=value), mock.patch.dict(
+                os.environ,
+                {"AZFILES_REFRESH_SLEEP_SECONDS": value},
+            ), mock.patch("logging.error") as mock_log:
+                mod = _load_refresh()
+
+            self.assertEqual(mod.SLEEP_TIME, 60)
+            mock_log.assert_any_call(
+                "Invalid AZFILES_REFRESH_SLEEP_SECONDS: value must be at least 5 seconds; using default 60"
+            )
 
     def test_invalid_timing_overrides_log_and_use_defaults(self):
         with mock.patch.dict(

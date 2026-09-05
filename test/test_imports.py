@@ -185,6 +185,16 @@ class TestImportsResolvable(unittest.TestCase):
             f"Available: {sorted(available_names)}"
         )
 
+    def test_azfilesrefresh_adds_configured_package_path_before_import(self):
+        refresh_path = os.path.join(SRC_DIR, "azfilesrefresh.py.in")
+        with open(refresh_path) as source_file:
+            source = source_file.read()
+
+        path_setup = 'sys.path.insert(0, "@PYTHON_SITE_PKG@")'
+        package_import = "from azfilesauth import"
+        self.assertIn(path_setup, source)
+        self.assertLess(source.index(path_setup), source.index(package_import))
+
 
 class TestNoUndefinedNames(unittest.TestCase):
     """Check that top-level function calls in key scripts reference defined names."""

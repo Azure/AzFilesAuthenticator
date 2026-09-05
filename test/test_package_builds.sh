@@ -148,12 +148,12 @@ for distro in "${DISTROS[@]}"; do
     # --- Step 4: Validate config ownership and permissions ---
     log "[$distro] Checking config ownership and permissions..."
     config_access=$(docker run --rm "$run_tag" stat -c '%a:%u:%g' /etc/azfilesauth/config.yaml 2>&1)
-    if [ "$config_access" = "644:0:0" ]; then
+    if [ "$config_access" = "600:0:0" ]; then
         pass "[$distro] config.yaml is root-owned and writable only by root"
         passed=$((passed + 1))
         results+=("PASS  $distro  config-access=$config_access")
     else
-        fail "[$distro] config.yaml access is $config_access; expected 644:0:0"
+        fail "[$distro] config.yaml access is $config_access; expected 600:0:0"
         failed=$((failed + 1))
         results+=("FAIL  $distro  config-access=$config_access")
         continue
