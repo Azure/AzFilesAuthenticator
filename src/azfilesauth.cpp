@@ -236,7 +236,53 @@ static void az_syslog(int priority, const char* format, ...) {
 // Macro override so all existing syslog(...) calls route through az_syslog
 #define syslog az_syslog
 
-int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
+int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid, bool use_local_default_cache);
+
+// True if the configured USER_UID is the special "local" sentinel rather than a numeric UID.
+static bool is_local_user_sentinel(const std::string& value) {
+    if (value.size() != std::strlen(USER_UID_LOCAL_SENTINEL)) return false;
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(value[i])) != USER_UID_LOCAL_SENTINEL[i]) return false;
+    }
+    return true;
+}
+
+// Resolves the invoking user's UID when USER_UID is the "local" sentinel. The
+// process itself always runs as root, so the original user is only available
+// via SUDO_UID (set by sudo); fall back to the real UID if not sudo-invoked.
+static uid_t resolve_local_invoking_uid() {
+    const char* sudo_uid = std::getenv("SUDO_UID");
+    if (sudo_uid && *sudo_uid) {
+        errno = 0;
+        char* endptr = nullptr;
+        long val = std::strtol(sudo_uid, &endptr, 10);
+        if (errno == 0 && endptr != sudo_uid && *endptr == '\0' && val >= 0) {
+            return static_cast<uid_t>(val);
+        }
+    }
+    return getuid();
+}
+
+// Resolves the configured USER_UID value (a numeric UID, or the "local" sentinel) to an
+// effective UID. Returns false if user_uid_str is neither.
+static bool resolve_configured_uid(const std::string& user_uid_str, uid_t& out_uid, bool& out_is_local) {
+    out_is_local = is_local_user_sentinel(user_uid_str);
+    if (out_is_local) {
+        out_uid = resolve_local_invoking_uid();
+        return true;
+    }
+    try {
+        size_t consumed = 0;
+        int parsed = std::stoi(user_uid_str, &consumed);
+        if (consumed != user_uid_str.size() || parsed < 0) {
+            return false;
+        }
+        out_uid = static_cast<uid_t>(parsed);
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
 
 // Check if a file exists
 bool fileExists(const std::string& filename) {
@@ -569,7 +615,7 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
 
 // Inserts a Kerberos credential into the credential cache.
 int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_ticket_data,
-		size_t krb_ticket_size, uid_t user_uid) {
+		size_t krb_ticket_size, uid_t user_uid, bool use_local_default_cache) {
     krb5_context context = NULL;
     krb5_error_code ret;
     krb5_auth_context auth_context = NULL;
@@ -588,9 +634,8 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
-    if (krb5_cc_name_str.empty()) {
-        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
-        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
+    if (use_local_default_cache || krb5_cc_name_str.empty()) {
+        syslog(LOG_INFO, "Using default per-user ccache for UID: %d", user_uid);
         krb5_cc_name_construct = "FILE:/tmp/krb5cc_" + std::to_string(user_uid);
     } else {
         krb5_cc_name_construct = krb5_cc_name_str;
@@ -666,7 +711,7 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     }
 
     //clear credentials from cache before inserting new one for same file uri
-    smb_clear_credential(file_endpoint_uri, user_uid);
+    smb_clear_credential(file_endpoint_uri, user_uid, use_local_default_cache);
     // Process the decoded credentials
     for (int i = 0; decoded_cred[i] != NULL; i++) {
         syslog(LOG_INFO, "Ticket %d:", i);
@@ -719,7 +764,8 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
 int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
                         const std::string& oauth_token,
                         unsigned int* credential_expires_in_seconds,
-                        uid_t user_uid) 
+                        uid_t user_uid,
+                        bool use_local_default_cache)
 {
     std::string expiration;
     std::string session_key;
@@ -767,7 +813,7 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
     decoded_pair = decodeBase64(krb_ticket);
     decoded = decoded_pair.first;
     size = decoded_pair.second;
-    rc = smb_insert_credential(file_endpoint_uri, decoded.c_str(), size, user_uid);
+    rc = smb_insert_credential(file_endpoint_uri, decoded.c_str(), size, user_uid, use_local_default_cache);
 
     syslog(LOG_INFO, "insert credential rc: %d", rc);
 
@@ -809,7 +855,7 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
         return -1;
 }
 
-int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
+int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid, bool use_local_default_cache) {
     krb5_context context = NULL;
     krb5_ccache ccache;
     krb5_principal principal;
@@ -840,9 +886,8 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
 
     syslog(LOG_INFO,"Clear credential for %s", endpoint_uri_str.c_str());
 
-    if (krb5_cc_name_str.empty()) {
-        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
-        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
+    if (use_local_default_cache || krb5_cc_name_str.empty()) {
+        syslog(LOG_INFO, "Using default per-user ccache for UID: %d", user_uid);
         krb5_cc_name_construct = "FILE:/tmp/krb5cc_" + std::to_string(user_uid);
     } else {
         krb5_cc_name_construct = krb5_cc_name_str;
@@ -926,7 +971,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
 }
 
 // List the credentials in the credential cache from KRB5_CC_NAME
-void smb_list_credential(bool is_json, uid_t user_uid) {
+void smb_list_credential(bool is_json, uid_t user_uid, bool use_local_default_cache) {
     krb5_context context = NULL;
     krb5_ccache ccache;
     krb5_error_code krb_rc;
@@ -956,9 +1001,8 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
-    if (krb5_cc_name_str.empty()) {
-        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
-        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
+    if (use_local_default_cache || krb5_cc_name_str.empty()) {
+        syslog(LOG_INFO, "Using default per-user ccache for UID: %d", user_uid);
         krb5_cc_name_construct = "FILE:/tmp/krb5cc_" + std::to_string(user_uid);
     } else {
         krb5_cc_name_construct = krb5_cc_name_str;
@@ -1089,14 +1133,19 @@ int extern_smb_set_credential_oauth_token(char* file_endpoint_uri,
         return -1;
     }
 
-    uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
+    uid_t user_uid;
+    bool is_local = false;
+    if (!resolve_configured_uid(user_uid_str, user_uid, is_local)) {
+        syslog(LOG_ERR, "Invalid USER_UID value in config file: %s", user_uid_str.c_str());
+        return -1;
+    }
     uid_t prev_uid = geteuid();
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         return -1;
     }
     
-    int rc = smb_set_credential_oauth_token(file_endpoint_uri, oauth_token, credential_expires_in_seconds, user_uid);
+    int rc = smb_set_credential_oauth_token(file_endpoint_uri, oauth_token, credential_expires_in_seconds, user_uid, is_local);
     seteuid(prev_uid);
 
     return rc;
@@ -1113,7 +1162,13 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
         return -1;
     }
 
-    uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
+    uid_t user_uid;
+    bool is_local = false;
+    if (!resolve_configured_uid(user_uid_str, user_uid, is_local)) {
+        syslog(LOG_ERR, "Invalid USER_UID value in config file: %s", user_uid_str.c_str());
+        printf("Invalid USER_UID value in config file: %s\n", user_uid_str.c_str());
+        return -1;
+    }
     uid_t prev_uid = geteuid();
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
@@ -1127,7 +1182,7 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
         return -1;
     }
 
-    int rc = smb_clear_credential(file_endpoint_uri, user_uid);
+    int rc = smb_clear_credential(file_endpoint_uri, user_uid, is_local);
     seteuid(prev_uid);
 
     return rc;
@@ -1144,7 +1199,13 @@ int extern_smb_list_credential(bool is_json) {
         return -1;
     }
 
-    uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
+    uid_t user_uid;
+    bool is_local = false;
+    if (!resolve_configured_uid(user_uid_str, user_uid, is_local)) {
+        syslog(LOG_ERR, "Invalid USER_UID value in config file: %s", user_uid_str.c_str());
+        printf("Invalid USER_UID value in config file: %s\n", user_uid_str.c_str());
+        return -1;
+    }
     uid_t prev_uid = geteuid();
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
@@ -1152,7 +1213,7 @@ int extern_smb_list_credential(bool is_json) {
         return -1;
     }
 
-    smb_list_credential(is_json, user_uid);
+    smb_list_credential(is_json, user_uid, is_local);
     seteuid(prev_uid);
     return 0;
 }

@@ -336,6 +336,43 @@ class TestAzureIdentityEnvironment(unittest.TestCase):
             self.assertEqual(os.environ["VALID"], "second")
             self.assertNotIn("INVALID", os.environ)
 
+    def test_init_new_user_skips_user_creation_for_local_sentinel(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w") as config_file:
+                config_file.write("USER_UID: local\n")
+
+            with mock.patch.dict(
+                self.mod.init_new_user.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ), mock.patch("os.system") as mock_system, mock.patch(
+                "subprocess.check_output"
+            ) as mock_check_output:
+                user_uid = self.mod.init_new_user()
+                saved_config = self.mod.load_config()
+
+        self.assertEqual(user_uid, "local")
+        # No shared user should be looked up or created.
+        mock_system.assert_not_called()
+        mock_check_output.assert_not_called()
+        # The sentinel must be left untouched in the config file.
+        self.assertEqual(saved_config["USER_UID"], "local")
+
+    def test_init_new_user_local_sentinel_is_case_insensitive(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.yaml")
+            with open(config_path, "w") as config_file:
+                config_file.write("USER_UID: Local\n")
+
+            with mock.patch.dict(
+                self.mod.init_new_user.__globals__,
+                {"CONFIG_FILE_PATH": config_path},
+            ), mock.patch("os.system") as mock_system:
+                user_uid = self.mod.init_new_user()
+
+        self.assertEqual(user_uid, "local")
+        mock_system.assert_not_called()
+
 
 # ===================================================================
 # Test: azfilesauthmanager.py — token acquisition logic

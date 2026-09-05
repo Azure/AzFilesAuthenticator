@@ -16,6 +16,11 @@
 
 #define CONFIG_FILE_PATH "/etc/azfilesauth/config.yaml"
 
+// Special USER_UID value: use the invoking (sudo) user's own credential cache
+// instead of a single shared user, so multiple identities can be stored for
+// the same storage account without clobbering each other's tickets.
+#define USER_UID_LOCAL_SENTINEL "local"
+
 // Default libcurl timeouts (seconds) used if not overridden via config
 #define DEFAULT_CURL_CONNECT_TIMEOUT 10L
 #define DEFAULT_CURL_TOTAL_TIMEOUT 30L
