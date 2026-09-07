@@ -26,7 +26,7 @@ if [ "$PKG" = "zypper" ]; then
     sudo zypper --non-interactive refresh
     sudo zypper --non-interactive install \
         rpm-build autoconf libtool make gcc gcc-c++ \
-        python3-devel libcurl-devel krb5-devel chrpath git automake \
+        python3-devel python3 python311 python311-devel libcurl-devel krb5-devel libyaml-devel chrpath git automake \
         binutils glibc-devel kernel-default-devel
 
     sudo zypper --non-interactive clean --all || true
@@ -40,7 +40,7 @@ if [ "$PKG" = "zypper" ]; then
 
 else
     sudo $PKG -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ python3-devel \
-        libcurl-devel krb5-devel chrpath git automake binutils glibc-devel kernel-headers
+        libcurl-devel krb5-devel libyaml-devel chrpath git automake binutils glibc-devel kernel-headers
     sudo $PKG clean all || true
 fi
 
@@ -48,7 +48,14 @@ rpmdev-setuptree ~
 # TODO: change the version number here 
 git archive --format=tar --prefix=azfilesauth-1.0/ HEAD -- . ':!debian' | gzip > ~/rpmbuild/SOURCES/azfilesauth-1.0.tar.gz
 cp rpm.spec ~/rpmbuild/SPECS/
-rpmbuild -ba ~/rpmbuild/SPECS/rpm.spec
+if [ "$PKG" = "zypper" ]; then
+    PYTHON=/usr/bin/python3.11 rpmbuild -ba \
+        --define '__python3 /usr/bin/python3.11' \
+        --define 'python3_sitelib /usr/lib/python3.11/site-packages' \
+        ~/rpmbuild/SPECS/rpm.spec
+else
+    rpmbuild -ba ~/rpmbuild/SPECS/rpm.spec
+fi
 
 mkdir -p PACKAGES/rpm
 cp ~/rpmbuild/RPMS/*/azfilesauth*.rpm PACKAGES/rpm/

@@ -5,7 +5,7 @@
 
 override_dh_auto_configure:
 	./autogen.sh || autoreconf -fi
-	./configure --prefix=/usr
+	PYTHON_SITE_PKG=/usr/lib/python3/dist-packages ./configure --prefix=/usr
 
 override_dh_auto_build:
 	make
@@ -15,3 +15,7 @@ override_dh_auto_install:
 
 override_dh_install:
 	dh_install --sourcedir=debian/azfilesauth
+
+override_dh_fixperms:
+	dh_fixperms --exclude=etc/azfilesauth/config.yaml
+	chmod 0600 debian/azfilesauth/etc/azfilesauth/config.yaml

@@ -72,6 +72,13 @@ def collect_defined_names(path):
     import builtins
     defined.update(dir(builtins))
 
+    def add_target_names(target):
+        if isinstance(target, ast.Name):
+            defined.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                add_target_names(element)
+
     for node in ast.walk(tree):
         # function/class defs
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -87,15 +94,14 @@ def collect_defined_names(path):
         # assignments
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name):
-                    defined.add(target.id)
+                add_target_names(target)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             defined.add(node.target.id)
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
             defined.add(node.target.id)
         # for/with targets
-        elif isinstance(node, ast.For) and isinstance(node.target, ast.Name):
-            defined.add(node.target.id)
+        elif isinstance(node, ast.For):
+            add_target_names(node.target)
         elif isinstance(node, ast.With):
             for item in node.items:
                 if item.optional_vars and isinstance(item.optional_vars, ast.Name):
@@ -178,6 +184,16 @@ class TestImportsResolvable(unittest.TestCase):
             f"but these names are not defined in azfilesauthmanager.py.\n"
             f"Available: {sorted(available_names)}"
         )
+
+    def test_azfilesrefresh_adds_configured_package_path_before_import(self):
+        refresh_path = os.path.join(SRC_DIR, "azfilesrefresh.py.in")
+        with open(refresh_path) as source_file:
+            source = source_file.read()
+
+        path_setup = 'sys.path.insert(0, "@PYTHON_SITE_PKG@")'
+        package_import = "from azfilesauth import"
+        self.assertIn(path_setup, source)
+        self.assertLess(source.index(path_setup), source.index(package_import))
 
 
 class TestNoUndefinedNames(unittest.TestCase):

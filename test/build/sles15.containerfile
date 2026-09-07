@@ -4,7 +4,7 @@ FROM registry.suse.com/bci/bci-base:15.6
 RUN zypper --non-interactive refresh && \
     zypper --non-interactive install \
         rpm-build autoconf libtool make gcc gcc-c++ \
-        python3-devel python3 libcurl-devel krb5-devel chrpath git automake \
+        python3-devel python3 python311 python311-devel libcurl-devel krb5-devel libyaml-devel chrpath git automake \
         binutils glibc-devel kernel-default-devel tar gzip && \
     zypper --non-interactive clean --all || true
 
@@ -16,7 +16,10 @@ RUN TOPDIR=/usr/src/packages && \
     tar --exclude=debian -czf $TOPDIR/SOURCES/azfilesauth-1.0.tar.gz \
         --transform 's,^\./,azfilesauth-1.0/,' -C /build . && \
     cp rpm.spec $TOPDIR/SPECS/ && \
-    rpmbuild -ba $TOPDIR/SPECS/rpm.spec && \
+    PYTHON=/usr/bin/python3.11 rpmbuild -ba \
+        --define '__python3 /usr/bin/python3.11' \
+        --define 'python3_sitelib /usr/lib/python3.11/site-packages' \
+        $TOPDIR/SPECS/rpm.spec && \
     rm -rf /build/PACKAGES && \
     mkdir -p /build/PACKAGES/rpm && \
     cp $TOPDIR/RPMS/*/azfilesauth*.rpm /build/PACKAGES/rpm/ && \

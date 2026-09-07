@@ -1,0 +1,4 @@
+# Optional Azure Identity SDK environment variables.
+# ENVIRONMENT:
+#   MSI_ENDPOINT: http://localhost:40342/metadata/identity/oauth2/token
+#   MSI_SECRET: replace-with-secret

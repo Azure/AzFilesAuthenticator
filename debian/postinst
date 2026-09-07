@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        chown root:root /etc/azfilesauth
+        chmod 0755 /etc/azfilesauth
+
+        # Fallback: install Azure Python SDK via pip if not satisfied by package manager.
+        # The preferred path is via packages.microsoft.com which provides
+        # python3-azure-identity and python3-azure-core as native .deb packages.
+        # This fallback handles environments where that repo is not configured.
+        if [ "${AZFILESAUTH_SKIP_PIP_INSTALL:-0}" = "1" ]; then
+            echo "azfilesauth: skipping azure-identity pip fallback because AZFILESAUTH_SKIP_PIP_INSTALL=1"
+            if ! python3 -c "import azure.identity, yaml" 2>/dev/null; then
+                echo "ERROR: azfilesauth requires azure-identity, azure-core, and PyYAML to function. Install them manually or remove AZFILESAUTH_SKIP_PIP_INSTALL." >&2
+                exit 1
+            fi
+        elif ! python3 -c "import azure.identity, yaml" 2>/dev/null; then
+            echo "azfilesauth: Python dependencies not found via apt; attempting pip install..."
+            if ! PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 \
+                "azure-identity>=1.14.0" "azure-core>=1.26.0" "PyYAML>=5.4" 2>/dev/null; then
+                if ! PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 --break-system-packages \
+                    "azure-identity>=1.14.0" "azure-core>=1.26.0" "PyYAML>=5.4"; then
+                    echo "ERROR: azfilesauth Python dependency installation failed. Install them manually: pip3 install azure-identity azure-core PyYAML" >&2
+                    exit 1
+                fi
+            fi
+        fi
+        if ! python3 -c "import azure.identity, azure.core, yaml" 2>/dev/null; then
+            echo "ERROR: azfilesauth Python dependencies are not importable after installation. Required: azure-identity, azure-core, and PyYAML." >&2
+            exit 1
+        fi
+        ;;
+esac
+
+#DEBHELPER#

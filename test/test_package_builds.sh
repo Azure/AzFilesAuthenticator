@@ -145,7 +145,34 @@ for distro in "${DISTROS[@]}"; do
     rm -f "$run_log"
     pass "[$distro] Package installed and validated"
 
-    # --- Step 4: Run azfilesauthmanager --version ---
+    # --- Step 4: Validate config ownership and permissions ---
+    log "[$distro] Checking config ownership and permissions..."
+    config_access=$(docker run --rm "$run_tag" stat -c '%a:%u:%g' /etc/azfilesauth/config.yaml 2>&1)
+    if [ "$config_access" = "600:0:0" ]; then
+        pass "[$distro] config.yaml is root-owned and writable only by root"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  config-access=$config_access")
+    else
+        fail "[$distro] config.yaml access is $config_access; expected 600:0:0"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  config-access=$config_access")
+        continue
+    fi
+
+    # --- Step 5: Validate Python dependencies ---
+    log "[$distro] Checking Python dependency imports..."
+    if docker run --rm "$run_tag" python3 -c "import azure.identity, azure.core, yaml"; then
+        pass "[$distro] Azure Identity, Azure Core, and PyYAML are importable"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  python-dependencies")
+    else
+        fail "[$distro] Required Python dependencies are not importable"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  python-dependencies")
+        continue
+    fi
+
+    # --- Step 6: Run azfilesauthmanager --version ---
     log "[$distro] Running azfilesauthmanager --version..."
     version_output=$(docker run --rm "$run_tag" azfilesauthmanager --version 2>&1)
     if [ -n "$version_output" ] && [ "$version_output" != "" ]; then
@@ -159,7 +186,7 @@ for distro in "${DISTROS[@]}"; do
         continue
     fi
 
-    # --- Step 5: Run azfilesrefresh smoke test ---
+    # --- Step 7: Run azfilesrefresh smoke test ---
     # azfilesrefresh is a long-running daemon; run it briefly to catch import/startup errors.
     # timeout exits 124 when the process is killed (expected), any other non-zero = real error.
     log "[$distro] Running azfilesrefresh for 5s smoke test..."
@@ -181,7 +208,7 @@ for distro in "${DISTROS[@]}"; do
     fi
     rm -f "$refresh_log"
 
-    # --- Step 6: Run unit tests inside distro container ---
+    # --- Step 8: Run unit tests inside distro container ---
     log "[$distro] Running unit tests on distro's Python..."
     unit_log=$(mktemp)
     if docker run --rm \
@@ -199,6 +226,24 @@ for distro in "${DISTROS[@]}"; do
         results+=("FAIL  $distro  unit-tests")
     fi
     rm -f "$unit_log"
+
+    # --- Step 9: Run native USER_UID resolution test ---
+    log "[$distro] Running local USER_UID resolution test..."
+    local_uid_log=$(mktemp)
+    if docker run --rm \
+        -v "$REPO_ROOT/test:/tests:ro" \
+        "$run_tag" \
+        bash /tests/test_local_user_uid.sh 2>&1 | tee "$local_uid_log" | tail -5; then
+        pass "[$distro] Local USER_UID resolution test passed"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  local-user-uid")
+    else
+        tail -20 "$local_uid_log"
+        fail "[$distro] Local USER_UID resolution test failed"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  local-user-uid")
+    fi
+    rm -f "$local_uid_log"
 done
 
 # --- Summary ---

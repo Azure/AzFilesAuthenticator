@@ -3,8 +3,13 @@ FROM registry.access.redhat.com/ubi10/ubi:latest
 
 COPY *.rpm /tmp/
 
-RUN dnf -y install --allowerasing python3 python3-requests curl krb5-libs && \
-    rpm -ivh /tmp/azfilesauth-*.x86_64.rpm && \
+# cifs-utils/keyutils aren't published in the free UBI repos (only in the
+# real entitled RHEL BaseOS channel), so pull them from the freely-accessible,
+# ABI-compatible CentOS Stream 10 BaseOS mirror instead of requiring registration.
+RUN printf '[cs10-baseos]\nname=CentOS Stream 10 BaseOS\nbaseurl=https://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/\ngpgcheck=0\nenabled=1\n' \
+        > /etc/yum.repos.d/centos-stream-baseos.repo && \
+    dnf -y install cifs-utils keyutils && \
+    dnf -y install --allowerasing /tmp/azfilesauth-*.x86_64.rpm && \
     dnf clean all
 
 # Validate

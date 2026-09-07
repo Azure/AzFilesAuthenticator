@@ -59,6 +59,23 @@ The package location and installation steps differ depending on your Linux distr
 
 > For the full end-to-end guide (storage account setup, managed identity configuration, mounting, and troubleshooting), see [Access SMB Azure file shares by using managed identities](https://learn.microsoft.com/en-us/azure/storage/files/files-managed-identities?tabs=linux).
 
+### Python Dependencies
+
+`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) and PyYAML. When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script installs the Python dependencies automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
+
+### Storage Account Prerequisite
+
+For managed identity authentication to work, the storage account must have the **SMBOAuth** feature enabled:
+
+```bash
+az storage account update \
+  --resource-group <resource-group> \
+  --name <storage-account> \
+  --enable-smb-oauth true
+```
+
+The managed identity (system or user-assigned) must also have the **Storage File Data SMB MI Admin** role assigned on the storage account.
+
 #### Azure Linux 3.0
 
 ```bash
@@ -193,6 +210,8 @@ sudo azfilesauthmanager set <file_endpoint_uri> <oauth_token>
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs...
 ```
 
+This endpoint is persisted with auth mode `token`. Since there is no credential source to refresh from, `azfilesrefresh` skips these endpoints rather than attempting to renew the ticket; you are responsible for re-running `set` with a fresh token before it expires.
+
 **2. Using System Assigned Managed Identity:**
 
 If your VM has a System Assigned Managed Identity enabled and granted access to the Azure File Share, you can use the `--system` flag. The tool will automatically fetch the token from the Azure Instance Metadata Service (IMDS).
@@ -223,6 +242,8 @@ sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --imd
 
 If your workload is running in a Kubernetes environment with Workload Identity Federation configured, you can authenticate using a federated token. You need to provide the Tenant ID, Client ID, and the path to the projected service account token file.
 
+For sovereign clouds, `--authority-host` selects the Microsoft Entra authority and `--resource` selects the Azure Storage resource. Pass `--resource` as the base resource URI, without the `/.default` suffix; the manager adds that suffix when requesting the token. For example, use `https://storage.azure.com/`, not `https://storage.azure.com/.default`. This matches the [Azure Files CSI driver](https://github.com/kubernetes-sigs/azurefile-csi-driver/blob/master/pkg/azurefile/azurefile.go), which supplies the storage resource without `/.default`.
+
 ```bash
 sudo azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id <tenant_id> --client-id <client_id> --token-file <token_file>
 ```
@@ -230,6 +251,20 @@ sudo azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id 
 *Example:*
 ```bash
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --workload-identity --tenant-id 00000000-0000-0000-0000-000000000000 --client-id 00000000-0000-0000-0000-000000000000 --token-file /var/run/secrets/azure/tokens/azure-identity-token
+```
+
+**Overriding a conflicting identity with `--force`:**
+
+Each endpoint's identity (auth mode, client ID, tenant ID) is persisted so `azfilesrefresh` can refresh it later. If a `set` targets an endpoint already associated with a *different* identity, the command is refused by default so credentials aren't silently swapped out from under another identity's ticket:
+
+```text
+[-] Refusing to set credential: Endpoint https://mystorageaccount.file.core.windows.net: existing auth_mode='user-assigned' does not match requested auth_mode='system'
+```
+
+If you understand the risk and want to proceed anyway, pass `--force` with `--system`, `--imds-client-id`, `--workload-identity`, or a direct OAuth token to overwrite the existing identity for that endpoint:
+
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --system --force
 ```
 
 #### Clear Credentials
@@ -318,10 +353,38 @@ These functions are used by the command-line utility to perform the required ope
 
 ## Configuration
 
-- **Configuration File:** The main configuration file is located at `/etc/azfilesauth/config.yaml`.
-- **Log Files:** Log files are located at `/var/log/syslog` (or `/var/log/messages`).
+- **Configuration File:** User-managed settings such as `KRB5_CC_NAME` and optional `USER_UID` are stored in `/etc/azfilesauth/config.yaml`. When `USER_UID` is absent, the manager and native library resolve the existing `azfilesuser` account by name; the manager does not write the discovered UID back to the file. Set `USER_UID` to a numeric UID to select a specific account, or `local` to use the invoking user's own cache.
+- **Runtime Authentication State:** Endpoint authentication metadata used by `azfilesrefresh` is stored as JSON in `/run/azfilesauth/endpoint-auth-state.json` and is recreated when authentication is configured. It is runtime state, not user configuration, and is cleared on reboot.
+- **Log Destination:** By default, `azfilesauth` logs to syslog (`/var/log/syslog` on Debian/Ubuntu, `/var/log/messages` on RHEL/SLES). To redirect logs to a file instead, add the following to `/etc/azfilesauth/config.yaml`:
 
-> todo: revise log files
+  ```yaml
+  LOG_DESTINATION: file
+  LOG_FILE_PATH: /var/log/azfilesauth.log
+  ```
+
+### Azure Identity environment variables
+
+To pass environment-specific settings such as `MSI_ENDPOINT` to the Azure Identity SDK, add them directly under `ENVIRONMENT` in `/etc/azfilesauth/config.yaml`:
+
+```yaml
+ENVIRONMENT:
+  MSI_ENDPOINT: http://localhost:40342/metadata/identity/oauth2/token
+  MSI_SECRET: example-secret
+  # AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+```
+
+The configuration is parsed with PyYAML's safe loader and is not executed as shell code. Variable names are case-sensitive, and values are converted to strings without shell expansion. Quote values when YAML might otherwise interpret their type, such as `"true"`, `"123"`, or `"null"`.
+
+The mapping is loaded immediately before each `ManagedIdentityCredential` or `ClientAssertionCredential` is created. This includes token renewal by the `azfilesrefresh` daemon, so no service-level environment configuration is required. Values in the mapping override variables inherited by the process, and added or changed values take effect on the next token request. Removing a key from the mapping does not unset it in an already-running refresh daemon; restart the daemon after removing a variable from the configuration.
+
+The daemon runs as root. Restrict the configuration file to root, especially when it contains secrets:
+
+```bash
+sudo chown root:root /etc/azfilesauth/config.yaml
+sudo chmod 600 /etc/azfilesauth/config.yaml
+```
+
+If `ENVIRONMENT` is omitted, Azure Identity uses the daemon's existing environment. If it is not a mapping or contains an invalid entry, token acquisition fails and the error is logged by the caller.
 
 ## Security Notes
 
@@ -367,15 +430,29 @@ This indicates authentication failure.
 *   **Solution:**
     *   Check if you have a valid ticket: `sudo azfilesauthmanager list`.
     *   Verify the ticket is for the correct storage account.
-    *   Ensure the identity (User/System Managed Identity or OAuth token owner) has the **"Storage File Data SMB MI Admin"** (or Reader/Elevated Contributor) role assigned on the Storage Account.
+    *   Ensure the identity (User/System Managed Identity or OAuth token owner) has the **"Storage File Data SMB MI Admin"** role assigned on the Storage Account.
     *   Refresh the credentials: `sudo azfilesauthmanager set <url> ...`
 
-#### 3. Managed Identity Issues
+#### 3. Mount error(126) with `cruid`
+
+After authenticating, the mount command must specify `cruid=<UID>` so the kernel knows which user's Kerberos cache to look in. By default, use the UID resolved from the `azfilesuser` account:
+
+```bash
+CRUID=$(id -u azfilesuser)
+sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
+  -o sec=krb5,cruid=${CRUID},dir_mode=0777,file_mode=0777,serverino,nosharesock
+```
+
+If `USER_UID` is explicitly configured with a numeric value, use that UID instead. `USER_UID: local` is per-invoking-user mode; use the UID of the user whose cache contains the ticket.
+
+#### 4. Managed Identity Issues
 *   **Symptom:** `azfilesauthmanager set ... --system` fails.
 *   **Solution:**
     *   Ensure the VM has a System Assigned Managed Identity enabled in the Azure Portal.
+    *   Ensure the storage account has SMBOAuth enabled: `az storage account update --enable-smb-oauth true`.
     *   Ensure the VM has network access to the IMDS endpoint (`169.254.169.254`).
     *   Check `curl -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/"` to verify IMDS connectivity manually.
+    *   Verify `azure-identity` is importable: `python3 -c "import azure.identity; print('OK')"`
 
 ## Packaging
 
@@ -427,8 +504,8 @@ This indicates authentication failure.
   License:        MIT
   URL:            https://example.com
   Source0:        %{name}-%{version}.tar.gz
-  BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath
-  Requires:       curl, krb5-libs, python3
+  BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
+  Requires:       curl, krb5-libs, python3, python3-pip
 
   %description
   Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
@@ -450,7 +527,7 @@ This indicates authentication failure.
 
   # Ensure the config directory is created
   mkdir -p %{buildroot}/etc/azfilesauth
-  install -m 644 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
+  install -m 600 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
 
   # Ensure the license directory exists and install LICENSE
   mkdir -p %{buildroot}%{_licensedir}/%{name}
@@ -468,6 +545,20 @@ This indicates authentication failure.
   %{_libdir}/libazfilesauth.la
   %{_bindir}/azfilesauthmanager
   %config(noreplace) /etc/azfilesauth/config.yaml
+
+  %post
+  %systemd_post azfilesrefresh.service
+  # Install Azure Python SDK via pip (azure-identity not available in standard repos)
+  python3 -c "import azure.identity" 2>/dev/null || \
+      python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
+      python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
+      echo "WARNING: azure-identity could not be installed."
+
+  %preun
+  %systemd_preun azfilesrefresh.service
+
+  %postun
+  %systemd_postun_with_restart azfilesrefresh.service
 
   %changelog
   * Thu Feb 20 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
@@ -525,12 +616,12 @@ To build and install the library from source, follow these steps:
     **Debian/Ubuntu:**
     ```bash
     sudo apt-get update
-    sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev
+    sudo apt-get install autoconf libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev libyaml-dev
     ```
 
     **RHEL/Azure Linux:**
     ```bash
-    sudo dnf install gcc-c++ make automake autoconf libtool curl-devel krb5-devel python3
+    sudo dnf install gcc-c++ make automake autoconf libtool curl-devel krb5-devel libyaml-devel python3
     ```
 
 2. **Build and Install the Library:**
