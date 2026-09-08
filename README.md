@@ -282,6 +282,20 @@ The `azfilesrefresh` daemon is a background service that automatically monitors 
 
 The `azfilesrefresh` service is installed automatically with the package.
 
+To let the daemon refresh credentials for an Azure Files mount declared in `/etc/fstab`, add
+`x-systemd.requires=azfilesrefresh.service` to its Kerberos CIFS mount options. The `username`
+must be `root` for a system-assigned managed identity or the client ID for a user-assigned identity:
+
+```fstab
+//mystorageaccount.file.core.windows.net/share /mnt/share cifs sec=krb5,username=root,x-systemd.requires=azfilesrefresh.service 0 0
+```
+
+The `x-systemd.requires=azfilesrefresh.service` option also makes the mount order after the service
+at boot. Before the daemon starts, an `ExecStartPre` provisioning step (`azfilesrefresh --provision`)
+creates the Kerberos ticket for each opted-in `fstab` entry, so the mount has valid credentials
+even on a fresh boot where no ticket exists yet. This requires IMDS reachability and that the managed
+identity has access to the share.
+
 **Start the service:**
 ```bash
 sudo systemctl start azfilesrefresh

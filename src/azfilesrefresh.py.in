@@ -135,41 +135,85 @@ def get_mount_options():
 
     return id_map
 
-def get_client_id(file_endpoint_uri):
-    id_map = None
+def get_fstab_options(fstab_path="/etc/fstab"):
+    id_map = {}
     try:
-        id_map = get_mount_options()
-        return id_map.get(file_endpoint_uri)
+        with open(fstab_path, 'r', encoding='utf-8') as fstab:
+            for line in fstab:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                fields = line.split()
+                if len(fields) < 4 or fields[2] != 'cifs' or not fields[0].startswith('//'):
+                    continue
+
+                options = fields[3].split(',')
+                if 'x-systemd.requires=azfilesrefresh.service' not in options:
+                    continue
+                if not any(option.startswith('sec=krb5') for option in options):
+                    continue
+
+                username = next((option.split('=', 1)[1] for option in options
+                                 if option.startswith('username=')), None)
+                if username:
+                    endpoint = fields[0][2:].split('/', 1)[0]
+                    id_map[endpoint] = username
+    except OSError as e:
+        log_error(f"Error reading {fstab_path}: {e}")
+
+    return id_map
+
+def get_client_id(file_endpoint_uri):
+    try:
+        client_id = get_mount_options().get(file_endpoint_uri)
+        if client_id is not None:
+            return client_id
     except Exception as e:
         log_error(f"Error getting mount options {e}")
 
-    return
+    return get_fstab_options().get(file_endpoint_uri)
+
+def set_ticket_for_endpoint(endpoint, client_id):
+    # username=root selects the system-assigned MI; any other value is a user-assigned client_id.
+    if client_id == "root":
+        log_status(f"username=root for {endpoint}; using system-assigned managed identity")
+        oauth_token = get_oauth_token()  # system MI (no client_id)
+    else:
+        log_status(f"Using client_id '{client_id}' for user-assigned managed identity")
+        oauth_token = get_oauth_token(client_id)  # user-assigned MI
+
+    if oauth_token is None:
+        raise Exception(f"Unable to obtain OAuth token for {endpoint}")
+    azfiles_set_oauth("https://" + endpoint, oauth_token)
 
 def refresh_ticket(ticket):
     try:
         endpoint = get_endpoint_from_principal(ticket['server'])
         client_id = get_client_id(endpoint)
-        # If the mount used username=root we treat this as system-assigned identity
-        # and do not require a client_id. Otherwise we use client_id for user-assigned MI.
         if client_id is None:
             log_error(f"Skipping refresh. Username not found for endpoint: {endpoint}")
             return
 
         log_status(f"Refresh token for {endpoint} initiated (mount username={client_id})")
-
-        if client_id == "root":
-            log_status(f"username=root for {endpoint}; using system-assigned managed identity")
-            oauth_token = get_oauth_token()  # system MI (no client_id)
-        else:
-            log_status(f"Using client_id '{client_id}' for user-assigned managed identity")
-            oauth_token = get_oauth_token(client_id)  # user-assigned MI
-
-        if oauth_token is None:
-            raise Exception(f"Unable to obtain OAuth token for {endpoint}")
-        result = azfiles_set_oauth("https://" + endpoint, oauth_token)
+        set_ticket_for_endpoint(endpoint, client_id)
         log_status(f"Ticket for {endpoint} refreshed")
     except Exception as e:
         log_error(f"Error refreshing ticket: {e}")
+
+def provision_fstab_tickets():
+    # Create tickets for opted-in fstab entries before mounts run, so boot-time mounts succeed.
+    fstab_map = get_fstab_options()
+    if not fstab_map:
+        log_status("No opted-in fstab entries found for provisioning.")
+        return
+    for endpoint, client_id in fstab_map.items():
+        try:
+            log_status(f"Provisioning ticket for {endpoint} (username={client_id})")
+            set_ticket_for_endpoint(endpoint, client_id)
+            log_status(f"Ticket for {endpoint} provisioned")
+        except Exception as e:
+            log_error(f"Error provisioning ticket for {endpoint}: {e}")
 
 def start_daemon():
     global RUNNING
@@ -189,5 +233,8 @@ if __name__ == "__main__":
     if os.geteuid() != 0:
         log_error(f"Script is not running as root. Please run as root")
         exit(1)
-    start_daemon()
-    # print(get_mount_options())
+    if "--provision" in sys.argv[1:]:
+        init_new_user()
+        provision_fstab_tickets()
+    else:
+        start_daemon()
