@@ -18,6 +18,13 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 
 `run_e2e_tests.sh` runs static checks and unit tests on every invocation. It marks the lifecycle and legacy suites as passed when they are skipped, so a successful runner exit does not prove those suites executed.
 
+The runner selects Python 3.8 or newer and uses that interpreter's `purelib`
+directory as `PYTHON_SITE_PKG`. Both values can be overridden when needed:
+
+```bash
+PYTHON=python3.11 PYTHON_SITE_PKG=/usr/lib/python3.11/site-packages ./test/run_e2e_tests.sh
+```
+
 ## Unit Tests: `test_unit.py`
 
 Run with:

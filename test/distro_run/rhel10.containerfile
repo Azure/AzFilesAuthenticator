@@ -9,13 +9,13 @@ COPY *.rpm /tmp/
 RUN printf '[cs10-baseos]\nname=CentOS Stream 10 BaseOS\nbaseurl=https://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/\ngpgcheck=0\nenabled=1\n' \
         > /etc/yum.repos.d/centos-stream-baseos.repo && \
     dnf -y install cifs-utils keyutils && \
-    dnf -y install --allowerasing /tmp/azfilesauth-*.x86_64.rpm && \
+    dnf -y install --allowerasing /tmp/azfilesauth-*.rpm && \
     dnf clean all
 
 # Validate
 RUN echo "=== Package info ===" && rpm -qi azfilesauth && \
     echo "=== Files ===" && rpm -ql azfilesauth && \
-    echo "=== Library ===" && ls -l /usr/lib64/libazfilesauth* && \
+    echo "=== Library ===" && ls -l /usr/lib/libazfilesauth* /usr/lib64/libazfilesauth* 2>/dev/null || true && \
     echo "=== Binaries ===" && \
     test -x /usr/bin/azfilesauthmanager && echo "azfilesauthmanager OK" && \
     test -x /usr/bin/azfilesrefresh && echo "azfilesrefresh OK" && \

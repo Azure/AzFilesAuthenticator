@@ -9,7 +9,7 @@ COPY *.rpm /tmp/
 RUN printf '[cs9-baseos]\nname=CentOS Stream 9 BaseOS\nbaseurl=https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/\ngpgcheck=0\nenabled=1\n' \
         > /etc/yum.repos.d/centos-stream-baseos.repo && \
     dnf -y install cifs-utils keyutils && \
-    dnf -y install --allowerasing /tmp/azfilesauth-*.x86_64.rpm && \
+    dnf -y install --allowerasing /tmp/azfilesauth-*.rpm && \
     dnf clean all
 
 # Validate

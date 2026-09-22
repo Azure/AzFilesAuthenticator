@@ -2,14 +2,15 @@
 FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
 RUN tdnf -y install rpm-build rpmdevtools autoconf libtool make gcc gcc-c++ \
-        python3-devel libcurl-devel krb5-devel libyaml-devel chrpath git automake \
+        python3-devel python3-pip libcurl-devel krb5-devel libyaml-devel chrpath git automake \
         binutils glibc-devel kernel-headers && \
     tdnf clean all
 
 WORKDIR /build
 COPY . /build/
 
-RUN rpmdev-setuptree ~ && \
+RUN rm -rf .libs src/.libs src/.deps && rm -f Makefile config.status config.log && \
+    rpmdev-setuptree ~ && \
     tar --exclude=debian -czf ~/rpmbuild/SOURCES/azfilesauth-1.0.tar.gz \
         --transform 's,^\./,azfilesauth-1.0/,' -C /build . && \
     cp rpm.spec ~/rpmbuild/SPECS/ && \

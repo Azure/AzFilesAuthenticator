@@ -9,13 +9,13 @@ BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-dev
 
 %if 0%{?suse_version}
 BuildRequires:  python311, python311-devel
-Requires:       curl, krb5, python311, python311-pip, python311-PyYAML
+Requires:       curl, krb5, python311
 %else
 BuildRequires:  python3 >= 3.8
 %if 0%{?azl}
-Requires:       curl, krb5-libs, python3 >= 3.8, python3-pip, PyYAML
+Requires:       curl, krb5-libs, python3 >= 3.8
 %else
-Requires:       curl, krb5-libs, python3 >= 3.8, python3-pip, python3-pyyaml
+Requires:       curl, krb5-libs, python3 >= 3.8
 %endif
 %endif
 
@@ -23,6 +23,10 @@ Requires:       curl, krb5-libs, python3 >= 3.8, python3-pip, python3-pyyaml
 Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
 
 %global _hardened_build 1  # Enable security hardening
+%global debug_package %{nil}
+# The entrypoint shebang intentionally targets the package-owned interpreter.
+# Do not turn its temporary buildroot path into an RPM dependency.
+%global __requires_exclude ^(python\(abi\).*|/.*BUILDROOT.*/opt/azfilesauth/venv/bin/python|/opt/azfilesauth/venv/bin/python3)$
 %prep
 %setup -q
 
@@ -37,7 +41,7 @@ rm -rf %{buildroot}
 make DESTDIR=%{buildroot} install
 
 # Ensure both installed scripts use the interpreter selected for this package.
-sed -i "1c#!%{__python3}" %{buildroot}%{_bindir}/azfilesauthmanager %{buildroot}%{_bindir}/azfilesrefresh
+sed -i "1c#!/opt/azfilesauth/venv/bin/python" %{buildroot}%{_bindir}/azfilesauthmanager %{buildroot}%{_bindir}/azfilesrefresh
 
 # Ensure the config directory is created
 mkdir -p %{buildroot}/etc/azfilesauth
@@ -58,6 +62,9 @@ fi
 %{_libdir}/libazfilesauth.*
 %{_bindir}/azfilesauthmanager
 %{_bindir}/azfilesrefresh
+%dir /opt/azfilesauth
+%dir /opt/azfilesauth/venv
+/opt/azfilesauth/venv/**
 %{_includedir}/azfilesauth.h
 %{_includedir}/azfilesauthversion.h
 %{python3_sitelib}/azfilesauth/
@@ -68,25 +75,9 @@ fi
 %systemd_post azfilesrefresh.service
 chown root:root /etc/azfilesauth
 chmod 0755 /etc/azfilesauth
-# Fallback: install Azure Python SDK via pip (set AZFILESAUTH_SKIP_PIP_INSTALL=1 to skip)
-if [ "${AZFILESAUTH_SKIP_PIP_INSTALL:-0}" -ne 1 ]; then
-    if ! %{__python3} -c "import azure.identity, yaml" 2>/dev/null; then
-        if ! PIP_DISABLE_PIP_VERSION_CHECK=1 %{__python3} -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 "azure-identity>=1.14.0" "azure-core>=1.26.0" "PyYAML>=5.4" 2>/dev/null; then
-            if ! PIP_DISABLE_PIP_VERSION_CHECK=1 %{__python3} -m pip install --quiet --no-input --no-cache-dir --retries 2 --timeout 15 --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" "PyYAML>=5.4"; then
-                echo "ERROR: azfilesauth Python dependency installation failed. Install them manually: pip3 install azure-identity azure-core PyYAML" >&2
-                exit 1
-            fi
-        fi
-    fi
-else
-    echo "INFO: Skipping azure-identity pip fallback because AZFILESAUTH_SKIP_PIP_INSTALL=1"
-    if ! %{__python3} -c "import azure.identity, yaml" 2>/dev/null; then
-        echo "ERROR: azfilesauth requires azure-identity, azure-core, and PyYAML to function. Install them manually or remove AZFILESAUTH_SKIP_PIP_INSTALL." >&2
-        exit 1
-    fi
-fi
-if ! %{__python3} -c "import azure.identity, azure.core, yaml" 2>/dev/null; then
-    echo "ERROR: azfilesauth Python dependencies are not importable after installation. Required: azure-identity, azure-core, and PyYAML." >&2
+
+if ! /opt/azfilesauth/venv/bin/python -c "import azure.identity, azure.core, yaml" 2>/dev/null; then
+    echo "ERROR: azfilesauth Python dependencies are not available in the packaged virtual environment." >&2
     exit 1
 fi
 

@@ -161,7 +161,7 @@ for distro in "${DISTROS[@]}"; do
 
     # --- Step 5: Validate Python dependencies ---
     log "[$distro] Checking Python dependency imports..."
-    if docker run --rm "$run_tag" python3 -c "import azure.identity, azure.core, yaml"; then
+    if docker run --rm "$run_tag" /opt/azfilesauth/venv/bin/python -c "import azure.identity, azure.core, yaml, azfilesauth"; then
         pass "[$distro] Azure Identity, Azure Core, and PyYAML are importable"
         passed=$((passed + 1))
         results+=("PASS  $distro  python-dependencies")
@@ -215,7 +215,7 @@ for distro in "${DISTROS[@]}"; do
         -v "$REPO_ROOT/test:/tests:ro" \
         -v "$REPO_ROOT/src:/src:ro" \
         "$run_tag" \
-        python3 /tests/test_unit.py 2>&1 | tee "$unit_log" | tail -5; then
+        /opt/azfilesauth/venv/bin/python /tests/test_unit.py 2>&1 | tee "$unit_log" | tail -5; then
         pass "[$distro] Unit tests passed on distro Python"
         passed=$((passed + 1))
         results+=("PASS  $distro  unit-tests")

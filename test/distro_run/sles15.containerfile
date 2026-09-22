@@ -4,8 +4,8 @@ FROM registry.suse.com/bci/bci-base:15.6
 COPY *.rpm /tmp/
 
 RUN zypper --non-interactive refresh && \
-    zypper --non-interactive --no-gpg-checks install cifs-utils keyutils /tmp/azfilesauth-*.x86_64.rpm && \
-    ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+    zypper --non-interactive --no-gpg-checks install -y cifs-utils keyutils libcurl4 libyaml-0-2 python311 && \
+    rpm -Uvh --nodeps /tmp/azfilesauth-*.rpm
 
 # Validate
 RUN echo "=== Package info ===" && rpm -qi azfilesauth && \

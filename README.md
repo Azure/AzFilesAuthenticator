@@ -61,7 +61,7 @@ The package location and installation steps differ depending on your Linux distr
 
 ### Python Dependencies
 
-`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) and PyYAML. When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script installs the Python dependencies automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
+`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) and PyYAML. The packaged `.deb` and `.rpm` files include a private virtual environment at `/opt/azfilesauth/venv` so the application runs in an isolated, self-contained Python environment without any install-time `pip` call.
 
 ### Storage Account Prerequisite
 
@@ -505,7 +505,7 @@ If `USER_UID` is explicitly configured with a numeric value, use that UID instea
   URL:            https://example.com
   Source0:        %{name}-%{version}.tar.gz
   BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
-  Requires:       curl, krb5-libs, python3, python3-pip
+  Requires:       curl, krb5-libs, python3
 
   %description
   Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
@@ -548,12 +548,6 @@ If `USER_UID` is explicitly configured with a numeric value, use that UID instea
 
   %post
   %systemd_post azfilesrefresh.service
-  # Install Azure Python SDK via pip (azure-identity not available in standard repos)
-  python3 -c "import azure.identity" 2>/dev/null || \
-      python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
-      python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
-      echo "WARNING: azure-identity could not be installed."
-
   %preun
   %systemd_preun azfilesrefresh.service
 
