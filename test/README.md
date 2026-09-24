@@ -11,6 +11,7 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 | `test_mi_lifecycle.py` | `RUN_MI_LIFECYCLE_TESTS=1 ./test/run_e2e_tests.sh` | No; opt-in | Root, installed package, Azure identity, CIFS, Kerberos, Azure resources |
 | `tests.py` | `./test/run_e2e_tests.sh` when `test/test_config.yaml` exists | No; conditional legacy path | Root, `requests`, client-secret config, mounted Azure Files share |
 | `test_package_builds.sh` | `./test/test_package_builds.sh [distros...]` | No; manual | Docker and supported distro images |
+| `test_local_user_uid.sh` | Invoked by `test_package_builds.sh`; also runnable directly | Yes in package-container validation | Root, installed package, writable `/etc/azfilesauth/config.yaml` |
 | `test_open_handles.sh` | Called by the disabled stress-test code in `tests.py` | No direct invocation | Mounted share, `sudo`, `dd`, write capacity |
 | `test_signing_sort.sh` | No caller | No | Empty file; currently contains no test |
 | `list_cred_op` | Fixture/sample JSON | Not a test | None |
@@ -39,6 +40,9 @@ Class: `TestYamlConfig`
 - `test_load_config_rejects_falsy_non_mapping_roots`: rejects lists, booleans, and numbers as configuration roots.
 - `test_init_new_user_preserves_existing_config`: records the local user UID without discarding existing settings.
 - `test_init_new_user_exits_when_config_cannot_be_loaded`: exits without creating a user or writing configuration when the config cannot be loaded.
+- `test_init_new_user_skips_user_creation_for_local_sentinel`: when `USER_UID: local` is already configured, `init_new_user()` skips shared-user lookup/creation and leaves the sentinel unchanged.
+- `test_init_new_user_local_sentinel_is_case_insensitive`: recognizes mixed-case values such as `USER_UID: Local` as the local-user sentinel.
+- Automatic `azfilesuser` discovery is not persisted: an existing or newly created shared account leaves `USER_UID` absent unless the operator explicitly configures it.
 
 ### Azure Identity environment configuration
 
@@ -70,14 +74,27 @@ Class: `TestGetWorkloadIdentityToken`
 - `test_resource_is_used_as_base_uri`: verifies a trailing slash is normalized and `/.default` is appended exactly once.
 - `test_sovereign_authority_and_resource_override`: verifies custom authority and resource values for sovereign/custom clouds.
 
+### Runtime endpoint authentication state
+
+Class: `TestEndpointAuthMetadata`
+
+- `test_metadata_uses_runtime_state_file`: writes and reads endpoint metadata through the runtime JSON state path using an isolated temporary directory.
+- `test_metadata_rejects_different_client_id_for_same_endpoint`: raises `AuthMetadataConflict` when a second identity (different `client_id`) tries to claim an endpoint already owned by another identity, and leaves the original owner's metadata untouched.
+- `test_metadata_write_takes_exclusive_lock`: proves the state-file `flock` is exclusive by showing a second non-blocking lock attempt fails with `EWOULDBLOCK`/`EAGAIN` while a writer holds it.
+
 ### Native-library wrappers
 
 Classes: `TestAzfilesSetOauth`, `TestAzfilesClear`, and `TestAzfilesList`
 
 - `test_set_calls_lib`: passes the endpoint and OAuth token to the native setter.
 - `test_set_nonzero_rc_exits`: exits when the native setter returns an error.
+- `test_set_persists_metadata_after_successful_lib_call`: confirms auth metadata is only written after the native credential-set call succeeds.
+- `test_set_direct_token_persists_token_auth_mode`: confirms a direct OAuth token set (no `--system`/`--imds-client-id`/`--workload-identity`) is persisted with `auth_mode="token"`.
+- `test_set_conflict_raised_before_lib_call`: confirms an identity conflict raises `AuthMetadataConflict` and the native setter is never called, so the krb5/keyring store is never touched for a rejected request.
+- `test_set_force_bypasses_conflict_and_overwrites_metadata`: confirms `force=True` skips the conflict check, still calls the native setter, and overwrites the endpoint's metadata with the new identity.
 - `test_clear_calls_lib`: calls the native credential-clear function.
 - `test_clear_nonzero_rc_exits`: exits when credential clearing fails.
+- `test_clear_removes_metadata`: confirms a successful clear also removes the endpoint's persisted auth metadata.
 - `test_list_plain`: requests plain credential output.
 - `test_list_json`: requests JSON credential output.
 - `test_list_nonzero_rc_exits`: propagates a nonzero list return code.
@@ -118,6 +135,10 @@ Class: `TestRefreshTicket`
 
 - `test_refresh_uses_system_mi_for_root_username`: uses system-assigned managed identity for a root mount.
 - `test_refresh_uses_user_mi_for_client_id_username`: uses the mount username as the user-assigned client ID.
+- `test_refresh_skips_if_metadata_client_id_differs_from_mount_user`: skips refresh (no token fetch, no credential write) when the persisted `client_id` does not match the current mount's username, preventing a stale/foreign identity from being refreshed onto the wrong endpoint.
+- `test_refresh_skips_workload_identity_metadata_when_present`: skips refresh entirely for endpoints persisted with workload-identity metadata, since workload-identity refresh is not currently supported.
+- `test_refresh_skips_token_auth_mode`: skips refresh entirely for endpoints persisted with `auth_mode="token"`, even when the mount's username would otherwise map to a managed identity, since a direct token has no credential source to refresh from.
+- `test_refresh_skips_when_identity_changes_during_token_fetch`: covers the race where an endpoint's identity is reassigned (e.g. via `set --force`) while the daemon's token fetch was in flight; `azfiles_set_oauth` re-validates the stale metadata under its own lock, raises `AuthMetadataConflict`, and `refresh_ticket` catches it as a skip instead of clobbering the new identity's credential.
 
 ### Epoch parsing
 
@@ -136,6 +157,9 @@ Class: `TestCLIArgParsing`
 - `test_list_command_calls_lib`: routes `list` to the native list wrapper.
 - `test_clear_command_calls_lib`: routes `clear` to the native clear wrapper.
 - `test_set_direct_token`: routes a direct OAuth token to the native setter.
+- `test_set_direct_token_conflict_exits_before_touching_krb5_cache`: end-to-end CLI check that a direct-token `set` against an endpoint already owned by a different identity exits with code `3`, never calls the native credential setter, and leaves the original owner's metadata intact.
+- `test_set_system_mi_conflict_exits_before_touching_krb5_cache`: end-to-end CLI check that `set ... --system` against an endpoint already owned by a different identity exits with code `3`, never calls the native credential setter, and leaves the original owner's metadata intact.
+- `test_set_system_mi_force_overwrites_conflicting_metadata`: end-to-end CLI check that `set ... --system --force` against an endpoint already owned by a different identity succeeds, calls the native credential setter, and overwrites the metadata to reflect the new identity.
 
 ### Ticket listing and daemon orchestration
 
@@ -231,6 +255,33 @@ For each selected distro (`ubuntu20`, `ubuntu22`, `ubuntu24`, `sles15`, `rhel9`,
 8. Mounts `test/` and `src/` read-only into the distro image and runs `test_unit.py` with that distro’s Python.
 
 This is not run by `run_e2e_tests.sh` and is a separate manual/package CI test.
+
+## USER_UID: local sentinel: `test_local_user_uid.sh`
+
+Run directly in an environment with the package installed (no Azure credentials or managed identity required):
+
+```bash
+./test/test_local_user_uid.sh
+```
+
+Verifies the already-installed package and actual compiled native library (with
+`LOG_DESTINATION: file` enabled so ccache resolution is
+observable) that when `USER_UID` is set to the special sentinel value `local`:
+
+- `init_new_user()` does not create or require a shared `azfilesuser`.
+- Each invocation resolves the credential cache to the *invoking* user's own UID
+  (via the `SUDO_UID` environment variable that `sudo` sets), rather than a single
+  shared cache file — e.g. `SUDO_UID=2001` and `SUDO_UID=2002` resolve to distinct
+  `/tmp/krb5cc_2001` and `/tmp/krb5cc_2002` caches. This is what unblocks storing
+  multiple identities against the same storage account, since each local user gets
+  an isolated ccache instead of sharing one.
+- When not invoked via `sudo` (`SUDO_UID` unset), it falls back to the real UID.
+- The `local` sentinel itself is never overwritten in `config.yaml`.
+
+It also verifies the default shared-account mode: with an existing `azfilesuser`
+and no `USER_UID` key, the native library resolves that account's UID and the
+configuration remains unchanged. It does not require real Azure credentials or
+an actual Kerberos ticket; it only asserts ccache resolution, not ticket storage.
 
 ## Shell Helper: `test_open_handles.sh`
 

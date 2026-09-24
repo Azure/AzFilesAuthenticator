@@ -210,6 +210,8 @@ sudo azfilesauthmanager set <file_endpoint_uri> <oauth_token>
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs...
 ```
 
+This endpoint is persisted with auth mode `token`. Since there is no credential source to refresh from, `azfilesrefresh` skips these endpoints rather than attempting to renew the ticket; you are responsible for re-running `set` with a fresh token before it expires.
+
 **2. Using System Assigned Managed Identity:**
 
 If your VM has a System Assigned Managed Identity enabled and granted access to the Azure File Share, you can use the `--system` flag. The tool will automatically fetch the token from the Azure Instance Metadata Service (IMDS).
@@ -249,6 +251,20 @@ sudo azfilesauthmanager set <file_endpoint_uri> --workload-identity --tenant-id 
 *Example:*
 ```bash
 sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --workload-identity --tenant-id 00000000-0000-0000-0000-000000000000 --client-id 00000000-0000-0000-0000-000000000000 --token-file /var/run/secrets/azure/tokens/azure-identity-token
+```
+
+**Overriding a conflicting identity with `--force`:**
+
+Each endpoint's identity (auth mode, client ID, tenant ID) is persisted so `azfilesrefresh` can refresh it later. If a `set` targets an endpoint already associated with a *different* identity, the command is refused by default so credentials aren't silently swapped out from under another identity's ticket:
+
+```text
+[-] Refusing to set credential: Endpoint https://mystorageaccount.file.core.windows.net: existing auth_mode='user-assigned' does not match requested auth_mode='system'
+```
+
+If you understand the risk and want to proceed anyway, pass `--force` with `--system`, `--imds-client-id`, `--workload-identity`, or a direct OAuth token to overwrite the existing identity for that endpoint:
+
+```bash
+sudo azfilesauthmanager set https://mystorageaccount.file.core.windows.net --system --force
 ```
 
 #### Clear Credentials
@@ -337,7 +353,8 @@ These functions are used by the command-line utility to perform the required ope
 
 ## Configuration
 
-- **Configuration File:** The main configuration file is located at `/etc/azfilesauth/config.yaml`.
+- **Configuration File:** User-managed settings such as `KRB5_CC_NAME` and optional `USER_UID` are stored in `/etc/azfilesauth/config.yaml`. When `USER_UID` is absent, the manager and native library resolve the existing `azfilesuser` account by name; the manager does not write the discovered UID back to the file. Set `USER_UID` to a numeric UID to select a specific account, or `local` to use the invoking user's own cache.
+- **Runtime Authentication State:** Endpoint authentication metadata used by `azfilesrefresh` is stored as JSON in `/run/azfilesauth/endpoint-auth-state.json` and is recreated when authentication is configured. It is runtime state, not user configuration, and is cleared on reboot.
 - **Log Destination:** By default, `azfilesauth` logs to syslog (`/var/log/syslog` on Debian/Ubuntu, `/var/log/messages` on RHEL/SLES). To redirect logs to a file instead, add the following to `/etc/azfilesauth/config.yaml`:
 
   ```yaml
@@ -418,13 +435,15 @@ This indicates authentication failure.
 
 #### 3. Mount error(126) with `cruid`
 
-After authenticating, the mount command must specify `cruid=<UID>` so the kernel knows which user's Kerberos cache to look in. The UID is the `azfilesuser` account created by `azfilesauthmanager`, stored in `/etc/azfilesauth/config.yaml`:
+After authenticating, the mount command must specify `cruid=<UID>` so the kernel knows which user's Kerberos cache to look in. By default, use the UID resolved from the `azfilesuser` account:
 
 ```bash
-CRUID=$(sudo awk '/USER_UID/{print $2}' /etc/azfilesauth/config.yaml)
+CRUID=$(id -u azfilesuser)
 sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
   -o sec=krb5,cruid=${CRUID},dir_mode=0777,file_mode=0777,serverino,nosharesock
 ```
+
+If `USER_UID` is explicitly configured with a numeric value, use that UID instead. `USER_UID: local` is per-invoking-user mode; use the UID of the user whose cache contains the ticket.
 
 #### 4. Managed Identity Issues
 *   **Symptom:** `azfilesauthmanager set ... --system` fails.
