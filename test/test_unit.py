@@ -417,17 +417,33 @@ class TestGetOauthToken(unittest.TestCase):
 
         self.assertIsNone(token)
 
-    def test_missing_sdk_dependency_returns_none(self):
+    def test_missing_sdk_dependency_falls_back_to_requests(self):
+        response = mock.MagicMock()
+        response.json.return_value = {"access_token": "fallback-token"}
+
         with mock.patch.dict(
             self.mod.get_oauth_token.__globals__,
-            {"ManagedIdentityCredential": None, "ClientAssertionCredential": None}
+            {
+                "ManagedIdentityCredential": None,
+                "ClientAssertionCredential": None,
+                "requests": mock.MagicMock(get=mock.MagicMock(return_value=response)),
+            }
+        ):
+            token = self.mod.get_oauth_token()
+
+        self.assertEqual(token, "fallback-token")
+
+    def test_missing_all_token_dependencies_returns_none(self):
+        with mock.patch.dict(
+            self.mod.get_oauth_token.__globals__,
+            {"ManagedIdentityCredential": None, "ClientAssertionCredential": None, "requests": None}
         ):
             with mock.patch("builtins.print") as mock_print:
                 token = self.mod.get_oauth_token()
 
         self.assertIsNone(token)
         printed = " ".join(" ".join(str(arg) for arg in call.args) for call in mock_print.call_args_list)
-        self.assertIn("Missing Python dependencies: azure-identity and azure-core", printed)
+        self.assertIn("install either azure-identity with azure-core, or python3-requests", printed)
 
 
 # ===================================================================
@@ -498,6 +514,24 @@ class TestGetWorkloadIdentityToken(unittest.TestCase):
                     token = self.mod.get_workload_identity_token("tenant-1", "client-1", token_path)
 
         self.assertEqual(token, "env-token")
+
+    @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
+    def test_missing_sdk_dependency_falls_back_to_requests(self):
+        response = mock.MagicMock()
+        response.json.return_value = {"access_token": "wi-token-fallback"}
+
+        with mock.patch.dict(
+            self.mod.get_workload_identity_token.__globals__,
+            {
+                "ClientAssertionCredential": None,
+                "ManagedIdentityCredential": None,
+                "requests": mock.MagicMock(post=mock.MagicMock(return_value=response)),
+                "load_azure_identity_environment": mock.MagicMock(return_value=True),
+            },
+        ):
+            token = self.mod.get_workload_identity_token("tenant-1", "client-1", "/tok")
+
+        self.assertEqual(token, "wi-token-fallback")
 
     @mock.patch("builtins.open", mock.mock_open(read_data="jwt-assertion-data"))
     def test_default_authority_is_public(self):

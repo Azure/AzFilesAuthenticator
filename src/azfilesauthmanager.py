@@ -14,6 +14,13 @@ except ImportError as e:
     YAML_IMPORT_ERROR = e
 
 try:
+    import requests
+    REQUESTS_IMPORT_ERROR = None
+except ImportError as e:
+    requests = None
+    REQUESTS_IMPORT_ERROR = e
+
+try:
     from azure.identity import ManagedIdentityCredential, ClientAssertionCredential
     from azure.core.exceptions import ClientAuthenticationError
     AZURE_IDENTITY_IMPORT_ERROR = None
@@ -90,19 +97,35 @@ def save_config(config):
         yaml.safe_dump(config, config_file, default_flow_style=False, sort_keys=False)
 
 
-def ensure_azure_identity_dependencies():
-    if yaml is not None and ManagedIdentityCredential is not None and ClientAssertionCredential is not None:
-        return True
-
+def _print_missing_token_dependency_error():
     print(
-        "Missing Python dependencies: azure-identity and azure-core; PyYAML is also required. "
-        "Install them (e.g. 'pip3 install azure-identity azure-core PyYAML') and retry."
+        "Missing Python dependencies: install either azure-identity with azure-core, "
+        "or python3-requests; PyYAML is also required."
     )
     if AZURE_IDENTITY_IMPORT_ERROR is not None:
         print(f"Dependency import error: {AZURE_IDENTITY_IMPORT_ERROR}")
+    if REQUESTS_IMPORT_ERROR is not None:
+        print(f"Dependency import error: {REQUESTS_IMPORT_ERROR}")
     if YAML_IMPORT_ERROR is not None:
         print(f"Dependency import error: {YAML_IMPORT_ERROR}")
-    return False
+
+
+def select_managed_identity_provider():
+    if ManagedIdentityCredential is not None:
+        return "azure-identity"
+    if requests is not None:
+        return "requests"
+    _print_missing_token_dependency_error()
+    return None
+
+
+def select_workload_identity_provider():
+    if ClientAssertionCredential is not None:
+        return "azure-identity"
+    if requests is not None:
+        return "requests"
+    _print_missing_token_dependency_error()
+    return None
 
 
 def load_azure_identity_environment():
@@ -189,24 +212,11 @@ def init_new_user():
     return new_user_uid
 
 
-def get_oauth_token(client_id=None):
-    if not load_azure_identity_environment():
-        return None
-
-    # Use ManagedIdentityCredential for IMDS: system-assigned (no client_id) or user-assigned (with client_id)
-    if not ensure_azure_identity_dependencies():
-        return None
-
+def _get_oauth_token_via_azure_identity(client_id=None):
     try:
-        # Instantiate ManagedIdentityCredential
-        # If client_id is None, it will use system-assigned managed identity
-        # If client_id is provided, it will use user-assigned managed identity
         credential = ManagedIdentityCredential(client_id=client_id) if client_id else ManagedIdentityCredential()
-        
-        # Get token for Azure Storage
         token_response = credential.get_token("https://storage.azure.com/.default")
         tok = token_response.token
-        
         if not tok:
             print("Access token missing from managed identity credential")
             return None
@@ -224,42 +234,48 @@ def get_oauth_token(client_id=None):
             print(f"Error fetching system-assigned managed identity token: {e}")
         return None
 
-def get_workload_identity_token(tenant_id, client_id, token_file, authority_host=None, resource=None):
+
+def _get_oauth_token_via_requests(client_id=None):
+    base = "http://169.254.169.254/metadata/identity/oauth2/token"
+    params = ["api-version=2018-02-01", "resource=https://storage.azure.com"]
+    if client_id:
+        params.append(f"client_id={client_id}")
+    url = base + "?" + "&".join(params)
+    headers = {"Metadata": "true"}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        tok = response.json().get("access_token")
+        if not tok:
+            print("Access token missing in IMDS response")
+            return None
+        return tok
+    except Exception as e:
+        if client_id:
+            print(f"Error fetching user-assigned managed identity token: {e}")
+        else:
+            print(f"Error fetching system-assigned managed identity token: {e}")
+        return None
+
+
+def get_oauth_token(client_id=None):
     if not load_azure_identity_environment():
         return None
 
-    if not all([tenant_id, client_id, token_file]):
-        print("Error: Missing parameters for Workload Identity.")
-        return None
+    provider = select_managed_identity_provider()
+    if provider == "azure-identity":
+        return _get_oauth_token_via_azure_identity(client_id)
+    if provider == "requests":
+        return _get_oauth_token_via_requests(client_id)
+    return None
 
-    if not ensure_azure_identity_dependencies():
-        return None
 
+def _get_workload_identity_token_via_azure_identity(tenant_id, client_id, client_assertion, authority, storage_resource):
     try:
-        with open(token_file, 'r') as f:
-            client_assertion = f.read().strip()
-    except Exception as e:
-        print(f"Error reading federated token file: {e}")
-        return None
-
-    # Default to public Azure AD / storage resource.
-    # Sovereign clouds (e.g. Mooncake, US Gov) pass a cloud-specific authority host.
-    # The resource is the base URI without the `/.default` scope suffix. This
-    # matches the Azure Files CSI driver's resource configuration.
-    authority = (
-        authority_host
-        or os.environ.get("AZURE_AUTHORITY_HOST")
-        or "https://login.microsoftonline.com"
-    ).rstrip("/")
-    storage_resource = (resource or "https://storage.azure.com").rstrip("/")
-
-    try:
-        # Define a token provider callback that returns the federated token
         def token_provider():
             return client_assertion
-        
-        # Use ClientAssertionCredential for Workload Identity Federation
-        # Pass the authority as the authority parameter for sovereign cloud support
+
         credential = ClientAssertionCredential(
             tenant_id=tenant_id,
             client_id=client_id,
@@ -267,11 +283,9 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
             authority=authority,
         )
 
-        # Get token for Azure Storage
         scope = f"{storage_resource}/.default"
         token_response = credential.get_token(scope)
         tok = token_response.token
-        
         if not tok:
             print("Access token missing from workload identity credential")
             return None
@@ -282,6 +296,65 @@ def get_workload_identity_token(tenant_id, client_id, token_file, authority_host
     except Exception as e:
         print(f"Error fetching Workload Identity token: {e}")
         return None
+
+
+def _get_workload_identity_token_via_requests(tenant_id, client_id, client_assertion, authority, storage_resource):
+    url = f"{authority}/{tenant_id}/oauth2/v2.0/token"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "client_id": client_id,
+        "scope": f"{storage_resource}/.default",
+        "grant_type": "client_credentials",
+        "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        "client_assertion": client_assertion,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, data=data, timeout=10)
+        response.raise_for_status()
+        tok = response.json().get("access_token")
+        if not tok:
+            print("Access token missing from Workload Identity response")
+            return None
+        return tok
+    except Exception as e:
+        print(f"Error fetching Workload Identity token: {e}")
+        return None
+
+
+def get_workload_identity_token(tenant_id, client_id, token_file, authority_host=None, resource=None):
+    if not load_azure_identity_environment():
+        return None
+
+    if not all([tenant_id, client_id, token_file]):
+        print("Error: Missing parameters for Workload Identity.")
+        return None
+
+    provider = select_workload_identity_provider()
+    if provider is None:
+        return None
+
+    try:
+        with open(token_file, 'r') as f:
+            client_assertion = f.read().strip()
+    except Exception as e:
+        print(f"Error reading federated token file: {e}")
+        return None
+
+    authority = (
+        authority_host
+        or os.environ.get("AZURE_AUTHORITY_HOST")
+        or "https://login.microsoftonline.com"
+    ).rstrip("/")
+    storage_resource = (resource or "https://storage.azure.com").rstrip("/")
+
+    if provider == "azure-identity":
+        return _get_workload_identity_token_via_azure_identity(
+            tenant_id, client_id, client_assertion, authority, storage_resource
+        )
+    return _get_workload_identity_token_via_requests(
+        tenant_id, client_id, client_assertion, authority, storage_resource
+    )
 
 
 def azfiles_set_oauth(file_endpoint_uri, oauth_token):

@@ -61,7 +61,7 @@ The package location and installation steps differ depending on your Linux distr
 
 ### Python Dependencies
 
-`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) and PyYAML. When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script installs the Python dependencies automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
+`azfilesauthmanager` requires PyYAML and an HTTP token acquisition path. The packaged runtime depends on `requests` and uses it as a built-in fallback for managed identity and workload identity token acquisition. If the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) is also installed, `azfilesauthmanager` will use it; otherwise it falls back to `requests`.
 
 ### Storage Account Prerequisite
 
@@ -433,7 +433,7 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
     *   Ensure the storage account has SMBOAuth enabled: `az storage account update --enable-smb-oauth true`.
     *   Ensure the VM has network access to the IMDS endpoint (`169.254.169.254`).
     *   Check `curl -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/"` to verify IMDS connectivity manually.
-    *   Verify `azure-identity` is importable: `python3 -c "import azure.identity; print('OK')"`
+    *   Verify the packaged Python dependencies are importable: `python3 -c "import requests, yaml; print('OK')"`
 
 ## Packaging
 
@@ -486,7 +486,7 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
   URL:            https://example.com
   Source0:        %{name}-%{version}.tar.gz
   BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
-  Requires:       curl, krb5-libs, python3, python3-pip
+  Requires:       curl, krb5-libs, python3, python3-requests, python3-pyyaml
 
   %description
   Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
@@ -529,11 +529,6 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
 
   %post
   %systemd_post azfilesrefresh.service
-  # Install Azure Python SDK via pip (azure-identity not available in standard repos)
-  python3 -c "import azure.identity" 2>/dev/null || \
-      python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
-      python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
-      echo "WARNING: azure-identity could not be installed."
 
   %preun
   %systemd_preun azfilesrefresh.service
