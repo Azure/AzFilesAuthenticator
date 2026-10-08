@@ -161,8 +161,8 @@ for distro in "${DISTROS[@]}"; do
 
     # --- Step 5: Validate Python dependencies ---
     log "[$distro] Checking Python dependency imports..."
-    if docker run --rm "$run_tag" python3 -c "import azure.identity, azure.core, yaml"; then
-        pass "[$distro] Azure Identity, Azure Core, and PyYAML are importable"
+    if docker run --rm "$run_tag" python3 -c "import requests, yaml"; then
+        pass "[$distro] Requests and PyYAML are importable"
         passed=$((passed + 1))
         results+=("PASS  $distro  python-dependencies")
     else
