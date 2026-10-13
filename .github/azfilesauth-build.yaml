@@ -72,6 +72,11 @@ extends:
                 - ImageOverride -equals $(imageName)
 
           steps:
+            - task: PipAuthenticate@1
+              displayName: 'Pip Authenticate'
+              inputs:
+                artifactFeeds: 'One/AzFilesAuthenticator'
+
             - checkout: self
               path: AzFilesAuthenticator
               displayName: 'Checkout Repository'
@@ -144,6 +149,11 @@ extends:
                 - ImageOverride -equals $(imageName)
 
           steps:
+            - task: PipAuthenticate@1
+              displayName: 'Pip Authenticate'
+              inputs:
+                artifactFeeds: 'One/AzFilesAuthenticator'
+
             - script: |
                 set -euxo pipefail
                 uname -m
