@@ -4,7 +4,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
-    apt-get install -y git autoconf libtool build-essential python3 \
+    apt-get install -y git autoconf libtool build-essential python3 python3-venv python3-pip \
         libcurl4-openssl-dev libkrb5-dev libyaml-dev debhelper-compat && \
     apt-get clean
 
@@ -13,6 +13,8 @@ COPY . /build/
 
 # autoreconf needed so dpkg-buildpackage clean step works
 RUN autoreconf -fi && \
+    make distclean >/dev/null 2>&1 || true; \
+    autoreconf -fi && \
     rm -f ../azfilesauth_*.deb && \
     dpkg-buildpackage -us -uc && \
     rm -rf /build/PACKAGES && \
