@@ -19,3 +19,16 @@ override_dh_install:
 override_dh_fixperms:
 	dh_fixperms --exclude=etc/azfilesauth/config.yaml
 	chmod 0600 debian/azfilesauth/etc/azfilesauth/config.yaml
+
+# Exclude the private virtual environment under /opt/azfilesauth/venv from stripping and shlibdeps.
+override_dh_shlibdeps:
+	dh_shlibdeps -Xopt/azfilesauth/venv
+
+override_dh_strip:
+	dh_strip -Xopt/azfilesauth/venv
+
+override_dh_dwz:
+	dh_dwz -Xopt/azfilesauth/venv
+
+override_dh_strip_nondeterminism:
+	dh_strip_nondeterminism -Xopt/azfilesauth/venv

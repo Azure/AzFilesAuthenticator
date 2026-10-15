@@ -153,7 +153,7 @@ def unmount_if_mounted(mount_point):
 
 
 def manage_refresh_service(action):
-    if shutil.which("systemctl"):
+    if shutil.which("systemctl") and os.path.exists("/run/systemd/system"):
         run_cmd(["systemctl", action, "azfilesrefresh"], check=True)
 
 

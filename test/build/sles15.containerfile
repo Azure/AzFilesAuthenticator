@@ -4,14 +4,15 @@ FROM registry.suse.com/bci/bci-base:15.6
 RUN zypper --non-interactive refresh && \
     zypper --non-interactive install \
         rpm-build autoconf libtool make gcc gcc-c++ \
-        python3-devel python3 python311 python311-devel libcurl-devel krb5-devel libyaml-devel chrpath git automake \
+        python3-devel python3 python311 python311-devel python311-pip libcurl-devel krb5-devel libyaml-devel chrpath git automake \
         binutils glibc-devel kernel-default-devel tar gzip && \
     zypper --non-interactive clean --all || true
 
 WORKDIR /build
 COPY . /build/
 
-RUN TOPDIR=/usr/src/packages && \
+RUN rm -rf .libs src/.libs src/.deps && rm -f Makefile config.status config.log && \
+    TOPDIR=/usr/src/packages && \
     mkdir -p $TOPDIR/{BUILD,RPMS,SOURCES,SPECS,SRPMS} && \
     tar --exclude=debian -czf $TOPDIR/SOURCES/azfilesauth-1.0.tar.gz \
         --transform 's,^\./,azfilesauth-1.0/,' -C /build . && \

@@ -43,6 +43,36 @@ USER_MI_CLIENT_ID="${USER_MI_CLIENT_ID:-}"
 WORKLOAD_CLIENT_ID="${WORKLOAD_CLIENT_ID:-}"
 WORKLOAD_TOKEN_FILE="${WORKLOAD_TOKEN_FILE:-}"
 RUN_MI_LIFECYCLE_TESTS="${RUN_MI_LIFECYCLE_TESTS:-0}"
+PYTHON="${PYTHON:-}"
+PYTHON_SITE_PKG="${PYTHON_SITE_PKG:-}"
+
+python_is_supported() {
+    command -v "$1" > /dev/null 2>&1 &&
+        "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' > /dev/null 2>&1
+}
+
+if [ -n "$PYTHON" ]; then
+    if ! python_is_supported "$PYTHON"; then
+        print_error "PYTHON must point to Python 3.8 or newer: $PYTHON"
+        exit 1
+    fi
+else
+    for python_candidate in python3 python3.13 python3.12 python3.11 python3.10 python3.9 python3.8; do
+        if python_is_supported "$python_candidate"; then
+            PYTHON="$python_candidate"
+            break
+        fi
+    done
+    if [ -z "$PYTHON" ]; then
+        print_error "Python 3.8 or newer was not found"
+        exit 1
+    fi
+fi
+
+if [ -z "$PYTHON_SITE_PKG" ]; then
+    PYTHON_SITE_PKG="$($PYTHON -c "import sysconfig; print(sysconfig.get_path('purelib'))")"
+fi
+export PYTHONPATH="$PYTHON_SITE_PKG${PYTHONPATH:+:$PYTHONPATH}"
 
 # VM connection
 VM_IP="${VM_IP:-20.219.7.207}"
@@ -57,6 +87,8 @@ print_info "Storage Account: $STORAGE_ACCOUNT"
 print_info "File Share: $FILE_SHARE"
 print_info "Tenant ID: $TENANT_ID"
 print_info "Mount Base: $MOUNT_BASE"
+print_info "Python: $PYTHON"
+print_info "Python site-packages: $PYTHON_SITE_PKG"
 
 if [ -z "$USER_MI_CLIENT_ID" ]; then
     print_info "User MI Client ID: (not configured - user MI tests will be skipped)"
@@ -182,7 +214,7 @@ print_header "Running Static and Unit Tests"
 print_info "Running test_imports.py..."
 echo ""
 
-if python3 "$TEST_DIR/test_imports.py"; then
+if "$PYTHON" "$TEST_DIR/test_imports.py"; then
     print_success "Static analysis tests completed"
     IMPORTS_RESULT=0
 else
@@ -196,7 +228,7 @@ print_header "Running Unit Tests"
 print_info "Running test_unit.py..."
 echo ""
 
-if python3 "$TEST_DIR/test_unit.py"; then
+if "$PYTHON" "$TEST_DIR/test_unit.py"; then
     print_success "Unit tests completed"
     UNIT_RESULT=0
 else
@@ -210,7 +242,7 @@ if [ "$RUN_MI_LIFECYCLE_TESTS" = "1" ]; then
     print_info "Running test_mi_lifecycle.py against $FILE_ENDPOINT..."
     echo ""
 
-    if python3 "$TEST_DIR/test_mi_lifecycle.py" "$FILE_ENDPOINT" --storage-account "$STORAGE_ACCOUNT" --file-share "$FILE_SHARE"; then
+    if "$PYTHON" "$TEST_DIR/test_mi_lifecycle.py" "$FILE_ENDPOINT" --storage-account "$STORAGE_ACCOUNT" --file-share "$FILE_SHARE"; then
         print_success "Managed identity lifecycle scenarios completed"
         MI_RESULT=0
     else
@@ -228,7 +260,7 @@ if [ -f "$TEST_DIR/test_config.yaml" ]; then
     print_info "Running tests.py run ${FILE_ENDPOINT}..."
     echo ""
 
-    if python3 "$TEST_DIR/tests.py" run "$FILE_ENDPOINT"; then
+    if "$PYTHON" "$TEST_DIR/tests.py" run "$FILE_ENDPOINT"; then
         print_success "Legacy integration tests completed"
         LEGACY_RESULT=0
     else
