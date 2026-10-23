@@ -43,6 +43,9 @@ azfilesrefresh: src/azfilesrefresh.py
 EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service config/config.yaml
 CLEANFILES = azfilesauthmanager azfilesrefresh
 
+# Native self-tests (make check)
+include $(top_srcdir)/test/native/local.mk
+
 # ensure only one instance of service is running
 
 # Install public headers

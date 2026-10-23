@@ -238,6 +238,13 @@ static void az_syslog(int priority, const char* format, ...) {
 
 int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
 
+// Directory of the default credential cache (test hook).
+static const char* g_ccache_dir = "/tmp";
+
+static std::string default_ccache_name(uid_t uid) {
+    return std::string("FILE:") + g_ccache_dir + "/krb5cc_" + std::to_string(uid);
+}
+
 // Validate an existing FILE credential cache before use. Only a regular file
 // owned by uid with mode 0600 is accepted; checked with lstat only, the file
 // is never opened. Non-FILE cache types are not checked. Returns 0 and sets
@@ -660,7 +667,7 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     if (krb5_cc_name_str.empty()) {
         syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
         syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
-        krb5_cc_name_construct = "FILE:/tmp/krb5cc_" + std::to_string(user_uid);
+        krb5_cc_name_construct = default_ccache_name(user_uid);
     } else {
         krb5_cc_name_construct = krb5_cc_name_str;
     }
@@ -922,7 +929,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     if (krb5_cc_name_str.empty()) {
         syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
         syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
-        krb5_cc_name_construct = "FILE:/tmp/krb5cc_" + std::to_string(user_uid);
+        krb5_cc_name_construct = default_ccache_name(user_uid);
     } else {
         krb5_cc_name_construct = krb5_cc_name_str;
     }
@@ -1044,7 +1051,7 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     if (krb5_cc_name_str.empty()) {
         syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
         syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
-        krb5_cc_name_construct = "FILE:/tmp/krb5cc_" + std::to_string(user_uid);
+        krb5_cc_name_construct = default_ccache_name(user_uid);
     } else {
         krb5_cc_name_construct = krb5_cc_name_str;
     }
