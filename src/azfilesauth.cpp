@@ -238,6 +238,74 @@ static void az_syslog(int priority, const char* format, ...) {
 
 int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
 
+// Validate an existing FILE credential cache before use. Only a regular file
+// owned by uid with mode 0600 is accepted; checked with lstat only, the file
+// is never opened. Non-FILE cache types are not checked. Returns 0 and sets
+// *exists, or -1 (logged) to refuse.
+static int check_ccache_file(const std::string& ccname, uid_t uid, bool* exists) {
+    std::string path = ccname;
+    size_t colon = path.find(':');
+    if (path.compare(0, 5, "FILE:") == 0) {
+        path.erase(0, 5);
+    } else if (path[0] != '/' && colon != std::string::npos && colon > 1) {
+        // Skip checks for non-FILE backend names such as KEYRING: and KCM:.
+        // A colon alone does not identify a backend: krb5 treats absolute
+        // paths (e.g. /tmp/name:cache) and one-letter prefixes (e.g. X:cache)
+        // as FILE paths. Those must fall through to lstat so their ownership,
+        // permissions and file type are still checked.
+        *exists = true;
+        return 0;
+    }
+
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0) {
+        int err = errno;
+        if (err == ENOENT) {
+            *exists = false;
+            return 0;
+        }
+        syslog(LOG_ERR, "Cannot check credential cache %s: %s", path.c_str(), strerror(err));
+        std::fprintf(stderr, "azfilesauth: cannot check credential cache %s: %s\n", path.c_str(), strerror(err));
+        return -1;
+    }
+
+    if (S_ISREG(st.st_mode) && st.st_uid == uid && (st.st_mode & 07777) == 0600) {
+        *exists = true;
+        return 0;
+    }
+
+    const char* type = S_ISREG(st.st_mode) ? "file" : S_ISLNK(st.st_mode) ? "symlink" :
+                       S_ISDIR(st.st_mode) ? "directory" : S_ISFIFO(st.st_mode) ? "fifo" : "other";
+    std::vector<char> msg(2 * path.size() + 256);
+    std::snprintf(msg.data(), msg.size(),
+                  "azfilesauth: refusing to use credential cache %s: type=%s owner_uid=%u (expected %u) "
+                  "mode=%04o (expected 0600); remove it manually (sudo rm -rf %s) and retry",
+                  path.c_str(), type, static_cast<unsigned>(st.st_uid), static_cast<unsigned>(uid),
+                  static_cast<unsigned>(st.st_mode & 07777), path.c_str());
+    syslog(LOG_ERR, "%s", msg.data());
+    std::fprintf(stderr, "%s\n", msg.data());
+    return -1;
+}
+
+// Creates an absent FILE cache exclusively (0600) so krb5 initializes a file
+// this process owns. Returns 0, or -1 (logged).
+static int create_ccache_file(const std::string& ccname) {
+    std::string path = ccname;
+    if (path.compare(0, 5, "FILE:") == 0) {
+        path.erase(0, 5);
+    }
+    int fd = open(path.c_str(), O_CREAT | O_EXCL, 0600);
+    if (fd < 0) {
+        syslog(LOG_ERR, "Failed to create credential cache %s: %s", path.c_str(), strerror(errno));
+        return -1;
+    }
+    if (close(fd) != 0) {
+        syslog(LOG_ERR, "Failed to close newly created credential cache %s: %s", path.c_str(), strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 // Check if a file exists
 bool fileExists(const std::string& filename) {
     return access(filename.c_str(), F_OK) == 0;
@@ -581,6 +649,7 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     std::string krb5_cc_name_construct;
     const char* cache_name;
     const char* KRB5_CC_NAME;
+    bool cache_exists = false;
 
     // Use read_config_value to get the value of KRB5_CC_NAME
     krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
@@ -632,7 +701,13 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
         goto out;
     }
 
-    ret = krb5_cc_get_principal(context, cache, &existing_principal);
+    if (check_ccache_file(krb5_cc_name_construct, user_uid, &cache_exists) != 0) {
+        goto out;
+    }
+
+    // An absent FILE cache is not read; create it exclusively before initializing.
+    ret = cache_exists ? krb5_cc_get_principal(context, cache, &existing_principal)
+                       : static_cast<krb5_error_code>(KRB5_FCC_NOFILE);
     if (ret == 0) {
         if (!krb5_principal_compare(context, existing_principal, decoded_cred[0]->client)) {
             syslog(LOG_ERR, "Credential cache already contains a different client principal: %s", existing_principal->data->data);
@@ -645,10 +720,13 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     } else if (ret == KRB5_FCC_NOFILE) {
         syslog(LOG_INFO, "No credential cache file found at %s", KRB5_CC_NAME);
         syslog(LOG_INFO, "Creating new credential cache file");
+        if (create_ccache_file(krb5_cc_name_construct) != 0) {
+            goto out;
+        }
         // Initialize the credential cache with the client principal
         int ret2 = krb5_cc_initialize(context, cache, decoded_cred[0]->client);
         if (ret2) {
-            syslog(LOG_ERR, "Failed to initialize credential cache: %s", krb5_get_error_message(context, ret));
+            syslog(LOG_ERR, "Failed to initialize credential cache: %s", krb5_get_error_message(context, ret2));
             goto out;
         }
     } else {
@@ -822,6 +900,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     const krb5_data* realm_data;
     std::string realm;
     std::string service_principal;
+    bool cache_exists = false;
 
     std::string endpoint_uri_str(file_endpoint_uri);
     if (endpoint_uri_str.substr(0, 8) == "https://") {
@@ -861,6 +940,14 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
     krb_rc = krb5_init_context(&context);
     if (krb_rc) {
         syslog(LOG_ERR, "krb5_init_context() failed: %s", krb5_get_error_message(context, krb_rc));
+        goto out;
+    }
+
+    if (check_ccache_file(krb5_cc_name_construct, user_uid, &cache_exists) != 0) {
+        goto out;
+    }
+    if (!cache_exists) {
+        syslog(LOG_ERR, "No credential cache at %s", KRB5_CC_NAME);
         goto out;
     }
 
@@ -1158,4 +1245,3 @@ int extern_smb_list_credential(bool is_json) {
 const char* extern_smb_version() {
     return AZFILESAUTH_VERSION;
 }
-

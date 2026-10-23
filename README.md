@@ -435,6 +435,14 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
     *   Check `curl -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/"` to verify IMDS connectivity manually.
     *   Verify `azure-identity` is importable: `python3 -c "import azure.identity; print('OK')"`
 
+#### 5. "refusing to use credential cache …"
+*   **Symptom:** `set` or `clear` fails with `azfilesauth: refusing to use credential cache /tmp/krb5cc_<USER_UID>: ...`.
+*   **Cause:** The credential cache file (default `/tmp/krb5cc_<USER_UID>`) must be a regular file owned by `azfilesuser` with mode `0600`. The file exists but does not meet these requirements, for example because it was created by a different user or has different permissions.
+*   **Solution:**
+    *   Check it: `ls -ld /tmp/krb5cc_<USER_UID>`.
+    *   Remove it: `sudo rm -f /tmp/krb5cc_<USER_UID>`, then run `set` again.
+    *   If the error persists, check that nothing else on the system is writing to this path.
+
 ## Packaging
 
 ### RPM Package
@@ -631,6 +639,8 @@ To build and install the library from source, follow these steps:
     ```
 
     If the `KRB5_CC_NAME` variable is not specified, the tool will default to `/tmp/krb5cc_<uid>`, where `<uid>` is the user ID of the `azfilesuser` (or the user specified in `USER_UID`).
+
+    A FILE cache is used only if it is a regular file owned by that user with mode `0600`. Put a custom cache in `/tmp` or in a directory that only root or that user can write to. `DIR:` caches are not checked.
 
     If the configuration file does not exist, the library will create it for you. If the credential cache file already exists with a different default client principal, you will need to use a different file. Any issues will be logged in `/var/log/syslog` (or `/var/log/messages` on RHEL/CentOS/Azure Linux), and you can take appropriate action based on the logged errors.
 
