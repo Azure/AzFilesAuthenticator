@@ -17,6 +17,92 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 
 `run_e2e_tests.sh` runs static checks and unit tests on every invocation. It marks the lifecycle and legacy suites as passed when they are skipped, so a successful runner exit does not prove those suites executed.
 
+## Native credential-cache selftests
+
+`native/ccache_owner_check_selftest.cpp` includes the library source to exercise
+its local cache operations with synthetic KRB-CRED fixtures, not HTTP, a KDC,
+real credentials, or user caches. Each case uses a fresh `1777` directory under
+`/tmp/azf-ccache-st.XXXXXX`. Success removes the scratch tree; assertion failures
+retain it, including `selftest.log`. No accounts are created.
+
+The portable executable retains the helper matrix, normal set/clear flow,
+and refusal matrix. The root executable retains the other-owner cache case, distinct
+owner refusal matrix, normal flow, and 200 probabilistic creation races.
+Root execution requires `AZF_SELFTEST_ROOT=1` and usable synthetic UIDs `4000123`
+(owner) and `4000124` (other user); otherwise it exits 77 (SKIP).
+
+### Deterministic root-only cases
+
+GNU ld wrappers for `open`, `close`, `lstat`, `krb5_cc_get_principal`,
+`krb5_cc_initialize`, and `krb5_cc_store_cred` are enabled only around a single
+target-path `op_set`. Other calls forward to the real implementation; shared
+libkrb5 internals are not interposed. The test retains real/saved UID 0 while
+running the operation with owner effective UID, temporarily using the other user's
+effective UID to create a file. It restores effective UID 0 afterward and does
+not change `run_as`. New cases use no sleeps.
+
+| Case | Input and forced interleaving | Required assertions and side effects |
+| --- | --- | --- |
+| `boundary-eexist` | Initially absent cache. After real `lstat` returns ENOENT, at the application's exclusive-open boundary, the other user creates a real `0666` file containing `other-owned-cache`, retaining an `O_RDWR` descriptor. Forward the application's open to the real syscall. | Boundary reached after absence check; requested mode `0600`; real open returns EEXIST; operation fails; zero initialize/store calls; library log contains path and EEXIST diagnostic. Path and retained descriptor still contain exactly the original bytes, no canary key; same inode, other-user owner/mode, descriptor still read/write. Retained descriptor is closed after checks. |
+| `boundary-eacces` | Initially absent cache. After real ENOENT, return EACCES at the matching exclusive open. | Boundary reached, requested mode `0600`, operation fails, zero initialize/store/close calls, path still absent, library log contains path and EACCES diagnostic; no credential write. |
+| `boundary-disappear` | Start with a valid owner-owned `0600` synthetic cache. After successful real `lstat`, unlink it immediately before forwarding principal lookup to real libkrb5. | Removal follows the successful check; real lookup returns `KRB5_FCC_NOFILE`; exactly one real exclusive recreation and successful close precede initialize. Immediately before initialize the file is empty, regular, owner-owned, `0600`. Operation succeeds with one initialize/store; resulting private cache contains the canary key. |
+| `boundary-close` | Initially absent cache. Allow the real exclusive open and real close, then report EIO from the close wrapper. | Boundary reached after absence check, requested mode `0600`, operation fails, zero initialize/store calls; library log contains path and EIO diagnostic. Empty owner-owned `0600` cache remains, no canary key; real close succeeded and descriptor is invalid (`EBADF`). |
+
+### Proposed Ubuntu 24.04 build and complete native runner
+
+These commands are a plan, not evidence of execution. Run only after review and
+authorization, in a disposable checkout on the VM. Prerequisites must already
+be installed: GNU C++/binutils/make, Autoconf/Automake/Libtool, Python 3, and
+development headers/libraries for curl, MIT Kerberos, and libyaml. No dependency
+installation, network access, package installation, or service startup is needed.
+Do not use the broader E2E/package runners for this local-cache validation.
+
+```bash
+cd /path/to/AzFilesAuthenticator
+set -eu
+export LC_ALL=C
+autoreconf -fi
+./configure
+make -j2 test/native/ccache_selftest test/native/ccache_selftest_root
+
+# Run as the ordinary VM user; all native portable cases.
+env -u AZF_SELFTEST_ROOT ./test/native/ccache_selftest
+
+# Explicitly authorize root cases; all root cases, including the 200 races.
+sudo env LC_ALL=C AZF_SELFTEST_ROOT=1 ./test/native/ccache_selftest_root
+
+# Alternative Automake runner INSTEAD of the two direct invocations:
+# sudo env LC_ALL=C AZF_SELFTEST_ROOT=1 make check TESTS='test/native/ccache_selftest test/native/ccache_selftest_root'
+```
+
+Require exit 0 and zero failures from both executables; exit 77 is a skip, not
+proof of root coverage. On failure inspect the printed scratch path and its
+library log before cleanup. The existing refusal/report assertions use captured
+stderr; the new deterministic cases deliberately inspect the library log.
+The existing non-FILE helper checks remain; no end-to-end non-FILE compatibility
+probe is added.
+
+### Ubuntu validation
+
+On Ubuntu 24.04.5 with MIT Kerberos 1.20.1, the portable executable passed
+147 checks and the root executable passed 647 checks, including the four
+deterministic cases and 200 creation races. Both exited zero.
+
+The Autotools build stopped at a libtoolize macro-directory conflict, so this
+run does not validate the Autotools or package build. The executables were
+instead built directly in a disposable source copy with the same libraries
+and linker wrappers:
+
+```bash
+sed 's/@PACKAGE_VERSION@/1.0.12/g' include/azfilesauthversion.h.in > include/azfilesauthversion.h
+wraps='-Wl,--wrap=open,--wrap=close,--wrap=lstat,--wrap=krb5_cc_get_principal,--wrap=krb5_cc_initialize,--wrap=krb5_cc_store_cred'
+g++ -std=c++17 -O2 -g -Iinclude test/native/ccache_owner_check_selftest.cpp \
+    -o test/native/ccache_selftest -lcurl -lkrb5 -lyaml "$wraps"
+g++ -std=c++17 -O2 -g -DCCACHE_SELFTEST_ROOT -Iinclude \
+    test/native/ccache_owner_check_selftest.cpp \
+    -o test/native/ccache_selftest_root -lcurl -lkrb5 -lyaml "$wraps"
+```
+
 ## Unit Tests: `test_unit.py`
 
 Run with:

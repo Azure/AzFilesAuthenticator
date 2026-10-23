@@ -12,6 +12,13 @@ test/artifacts/
 src/.dirstamp
 m4/
 
+# Native self-test binaries and automake test results
+test/native/ccache_selftest
+test/native/ccache_selftest_root
+test-driver
+test/native/*.trs
+test/native/.dirstamp
+
 # Ignore build artifacts
 /build/
 .libs/

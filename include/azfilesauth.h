@@ -14,7 +14,9 @@
 #define X_MS_DATE_HEADER "x-ms-date: "                  // space to add date
 #define KRB5_CLIENT_PRINCIPAL "AzureFileClient"         // Server-side hard coded client principal
 
+#ifndef CONFIG_FILE_PATH
 #define CONFIG_FILE_PATH "/etc/azfilesauth/config.yaml"
+#endif
 
 // Default libcurl timeouts (seconds) used if not overridden via config
 #define DEFAULT_CURL_CONNECT_TIMEOUT 10L
