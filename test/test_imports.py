@@ -165,6 +165,9 @@ class TestSyntax(unittest.TestCase):
         if os.path.exists(config_py):
             self._check_syntax(config_py)
 
+    def test_bootstrap_syntax(self):
+        self._check_syntax(os.path.join(SRC_DIR, "azfilesauthbootstrap.py"))
+
 
 class TestImportsResolvable(unittest.TestCase):
     """Verify that all names imported from 'azfilesauth' in azfilesrefresh.py.in
@@ -174,7 +177,7 @@ class TestImportsResolvable(unittest.TestCase):
         refresh_path = os.path.join(SRC_DIR, "azfilesrefresh.py.in")
         manager_path = os.path.join(SRC_DIR, "azfilesauthmanager.py")
 
-        imported_names = get_imports_from_module(refresh_path, "azfilesauth")
+        imported_names = get_imports_from_module(refresh_path, "azfilesauthmanager")
         available_names = get_top_level_names(manager_path)
 
         missing = imported_names - available_names
@@ -185,15 +188,23 @@ class TestImportsResolvable(unittest.TestCase):
             f"Available: {sorted(available_names)}"
         )
 
-    def test_azfilesrefresh_adds_configured_package_path_before_import(self):
+    def test_azfilesrefresh_adds_private_runtime_path_before_import(self):
         refresh_path = os.path.join(SRC_DIR, "azfilesrefresh.py.in")
         with open(refresh_path) as source_file:
             source = source_file.read()
 
-        path_setup = 'sys.path.insert(0, "@PYTHON_SITE_PKG@")'
-        package_import = "from azfilesauth import"
+        path_setup = 'sys.path.insert(0, "@AZFILESAUTH_RUNTIME_DIR@")'
+        package_import = "from azfilesauthmanager import"
         self.assertIn(path_setup, source)
         self.assertLess(source.index(path_setup), source.index(package_import))
+
+    def test_bootstrap_precedes_third_party_imports(self):
+        for filename, application_import in (
+            ("azfilesauthmanager.py", "import yaml"),
+            ("azfilesrefresh.py.in", "from azfilesauthmanager import"),
+        ):
+            source = read_py_source(os.path.join(SRC_DIR, filename))
+            self.assertLess(source.index("bootstrap()"), source.index(application_import))
 
 
 class TestNoUndefinedNames(unittest.TestCase):
@@ -240,7 +251,7 @@ class TestCrossScriptConsistency(unittest.TestCase):
         manager_path = os.path.join(SRC_DIR, "azfilesauthmanager.py")
 
         # Names that azfilesrefresh imports from azfilesauth
-        needed = get_imports_from_module(refresh_path, "azfilesauth")
+        needed = get_imports_from_module(refresh_path, "azfilesauthmanager")
         # Names that azfilesauthmanager defines at top level (exported via import *)
         exported = get_top_level_names(manager_path)
 

@@ -55,6 +55,7 @@ def _load_module_from_source(name: str, path: str, pre_patch=None):
 
     spec = importlib.util.spec_from_loader(name, loader=None)
     mod = importlib.util.module_from_spec(spec)
+    mod.__file__ = path
 
     saved = {}
     if pre_patch:
@@ -139,7 +140,7 @@ def _load_refresh():
     fake_azfilesauth.get_oauth_token = mock.MagicMock(return_value="fake-token-123")
     fake_azfilesauth.init_new_user = mock.MagicMock()
 
-    pre_patch = {"azfilesauth": fake_azfilesauth}
+    pre_patch = {"azfilesauthmanager": fake_azfilesauth}
 
     # Redirect logging to a temp file or NullHandler so tests don't need /var/log access
     import logging as _logging
@@ -1065,8 +1066,36 @@ class TestStartDaemon(unittest.TestCase):
 
 
 # ===================================================================
-# Main
+# Lifecycle harness safety
 # ===================================================================
+
+class TestLifecycleHarness(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_module_from_source(
+            "mi_lifecycle", os.path.join(REPO_ROOT, "test", "test_mi_lifecycle.py")
+        )
+
+    def test_container_does_not_invoke_systemctl_without_systemd(self):
+        with mock.patch.object(self.mod.Path, "is_dir", return_value=False), \
+                mock.patch.object(self.mod, "run_cmd") as run:
+            self.mod.manage_refresh_service("stop")
+        run.assert_not_called()
+
+    def test_host_with_systemd_uses_service_manager(self):
+        with mock.patch.object(self.mod.Path, "is_dir", return_value=True), \
+                mock.patch.object(self.mod.shutil, "which", return_value="/usr/bin/systemctl"), \
+                mock.patch.object(self.mod, "run_cmd") as run:
+            self.mod.manage_refresh_service("stop")
+        run.assert_called_once_with(["systemctl", "stop", "azfilesrefresh"], check=True)
+
+    def test_io_probe_removes_only_its_own_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            existing = os.path.join(directory, "existing.txt")
+            with open(existing, "w") as output:
+                output.write("keep")
+            self.mod.write_and_read_probe(directory, "unit")
+            self.assertEqual(os.listdir(directory), ["existing.txt"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -3,11 +3,15 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-COPY *.deb /tmp/
+COPY . /tmp/
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 RUN apt-get update && \
     apt-get install -y /tmp/azfilesauth_*.deb && \
     apt-get clean
+
+RUN printf 'PYTHON_VENV_PATH: /opt/azfilesauth/venv\n' >> /etc/azfilesauth/config.yaml
 
 # Validate
 RUN echo "=== Package info ===" && dpkg -s azfilesauth && \

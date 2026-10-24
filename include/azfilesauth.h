@@ -35,10 +35,12 @@ extern "C" {
 
 	const char* extern_smb_version();
 
+	int extern_azfilesauth_venv_path(char* value, size_t value_size,
+				       char* error, size_t error_size);
+
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif // AZAUTHENTICATOR_H
-

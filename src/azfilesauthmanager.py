@@ -2,6 +2,12 @@
 
 import os
 import sys
+
+if __name__ == "__main__":
+    sys.path.insert(0, "@AZFILESAUTH_RUNTIME_DIR@")
+    from azfilesauthbootstrap import bootstrap
+    bootstrap()
+
 import subprocess
 import time
 import ctypes

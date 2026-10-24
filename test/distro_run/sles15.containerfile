@@ -1,11 +1,15 @@
 # Test azfilesauth RPM installation on SLES 15 SP6
 FROM registry.suse.com/bci/bci-base:15.6
 
-COPY *.rpm /tmp/
+COPY . /tmp/
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 RUN zypper --non-interactive refresh && \
     zypper --non-interactive --no-gpg-checks install /tmp/azfilesauth-*.x86_64.rpm && \
     ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+
+RUN printf 'PYTHON_VENV_PATH: /opt/azfilesauth/venv\n' >> /etc/azfilesauth/config.yaml
 
 # Validate
 RUN echo "=== Package info ===" && rpm -qi azfilesauth && \

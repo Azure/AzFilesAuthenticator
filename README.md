@@ -61,7 +61,7 @@ The package location and installation steps differ depending on your Linux distr
 
 ### Python Dependencies
 
-`azfilesauthmanager` requires the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`) and PyYAML. When you install via the Microsoft package feed these are satisfied by native packages. When installing from a local `.deb`/`.rpm` build, the post-install script installs the Python dependencies automatically (falling back to `--break-system-packages` on Ubuntu 24.04+ which enforces PEP 668).
+`azfilesauthmanager` and `azfilesrefresh` require the [Azure Identity SDK for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme) (`azure-identity >= 1.14.0`, `azure-core >= 1.26.0`), PyYAML (`>= 5.4`), and packaging (`>= 20.0`) for dependency-version validation. Dependencies are checked and installed at runtime, not during package installation. Pip is needed only when dependencies are missing or outdated. Configure a venv to bootstrap pip and dependencies automatically. See [Runtime Python dependencies](#runtime-python-dependencies), especially for externally managed system Python on Ubuntu 24.04+.
 
 ### Storage Account Prerequisite
 
@@ -335,7 +335,61 @@ const char* extern_smb_version();
 
 These functions are used by the command-line utility to perform the required operations.
 
+The runtime bootstrap also uses `extern_azfilesauth_venv_path(value, value_size,
+error, error_size)` to read `PYTHON_VENV_PATH` through libyaml without first
+requiring PyYAML. It returns zero on success (an empty value selects system
+Python), or a nonzero status with a message in the caller-provided error buffer.
+
 ## Configuration
+
+### Runtime Python dependencies
+
+Package installation does not run pip or require pip/PyYAML OS packages.
+Both `azfilesauthmanager` and `azfilesrefresh` check Python dependencies at startup,
+before initializing users or credentials. Startup failures return a nonzero exit
+status; daemon startup errors are also visible in `journalctl -u azfilesrefresh`.
+
+By default, the package uses its system Python interpreter. If all required
+versions and imports are available, startup proceeds without checking for pip
+or accessing a package index. If dependencies are missing or outdated, existing
+pip is used to install the packaged `requirements.txt`. If system pip is also
+missing, startup fails explicitly; configure a venv or provision system pip or
+the dependencies through your administrator.
+Root-owned, non-group/world-writable `/usr/local` system site-package directories
+are included when needed for distro pip compatibility (including RHEL), while
+user site packages and Python environment overrides remain disabled.
+
+For an isolated environment, configure:
+
+```yaml
+PYTHON_VENV_PATH: /opt/azfilesauth/venv
+```
+
+The path must be absolute, root-owned, and not group/world writable, including
+its existing parent directories. Symlinked environment paths are rejected
+(the interpreter symlinks normally created inside a venv are supported).
+An absent venv is created automatically; an existing non-venv directory is
+rejected without replacing it. When dependencies need installation, missing pip
+is bootstrapped using `ensurepip`, and Python dependencies are installed inside
+the venv. An already-ready venv does not need pip.
+Existing venvs must not enable `include-system-site-packages`.
+Package prerequisites supply matching venv/ensurepip support automatically:
+Ubuntu uses `python3-venv`; the supported RPM distributions provide it through
+their Python packages. Pip's bootstrap wheel data does not install global pip.
+No manual venv-support installation or `get-pip.py` download is needed.
+
+Runtime setup is serialized across the CLI and daemon. Dependencies are verified
+using the selected interpreter before execution continues. Bootstrap messages go
+to stderr, preserving `list --json` output. A configured venv never silently falls
+back to system Python. Restart the daemon after changing `PYTHON_VENV_PATH`.
+
+Pip failures, including unavailable package indexes and externally managed system
+Python (PEP 668), abort startup. The tool never automatically passes
+`--break-system-packages`; configure a venv or provision dependencies through
+your administrator instead. The old package-install-time
+`AZFILESAUTH_SKIP_PIP_INSTALL` switch no longer applies.
+Runtime installation is not transactional: pip may partially modify an
+environment before failing. A dedicated venv limits the impact on system Python.
 
 - **Configuration File:** The main configuration file is located at `/etc/azfilesauth/config.yaml`.
 - **Log Destination:** By default, `azfilesauth` logs to syslog (`/var/log/syslog` on Debian/Ubuntu, `/var/log/messages` on RHEL/SLES). To redirect logs to a file instead, add the following to `/etc/azfilesauth/config.yaml`:
@@ -473,77 +527,12 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
   ```
 
   #### Configure the build pipeline
-  We are now ready to setup the build specification. To do the same, create and open a file in the `SPEC` folder, and populate with the given config. In this case, since the package is `azfilesauth`, the spec file is called `azfilesauth.spec`.
-  
-  >**NOTE**: It is important to have your project configured to be built with automake tools, i.e. `autoreconf -i`, `sudo make`, `sudo make install`. 
+  Use the repository's [rpm.spec](rpm.spec), which includes the shared runtime
+  bootstrap and distro-specific interpreter settings. Do not add pip installs
+  to package lifecycle scripts.
 
-  ```text
-  Name:           azfilesauth
-  Version:        1.0
-  Release:        1%{?dist}
-  Summary:        Azure Files Authentication Library
-  License:        MIT
-  URL:            https://example.com
-  Source0:        %{name}-%{version}.tar.gz
-  BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
-  Requires:       curl, krb5-libs, python3, python3-pip
-
-  %description
-  Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
-
-  %global _hardened_build 1  # Enable security hardening
-
-  %prep
-  %setup -q
-
-  %build
-  # Run autotools-based build
-  autoreconf -i
-  %configure --prefix=%{_prefix} --libdir=%{_libdir}
-  make
-
-  %install
-  rm -rf %{buildroot}
-  make DESTDIR=%{buildroot} install
-
-  # Ensure the config directory is created
-  mkdir -p %{buildroot}/etc/azfilesauth
-  install -m 600 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
-
-  # Ensure the license directory exists and install LICENSE
-  mkdir -p %{buildroot}%{_licensedir}/%{name}
-  install -m 644 LICENSE %{buildroot}%{_licensedir}/%{name}/
-
-  # -- Remove RPATH (Only if the library exists) --
-  if [ -f "%{buildroot}%{_libdir}/libazfilesauth.so.0.0.0" ]; then
-      chrpath --delete %{buildroot}%{_libdir}/libazfilesauth.so.0.0.0
-  fi
-
-  %files
-  %license %{_licensedir}/%{name}/LICENSE
-  %doc README.md
-  %{_libdir}/libazfilesauth.so*
-  %{_libdir}/libazfilesauth.la
-  %{_bindir}/azfilesauthmanager
-  %config(noreplace) /etc/azfilesauth/config.yaml
-
-  %post
-  %systemd_post azfilesrefresh.service
-  # Install Azure Python SDK via pip (azure-identity not available in standard repos)
-  python3 -c "import azure.identity" 2>/dev/null || \
-      python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
-      python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
-      echo "WARNING: azure-identity could not be installed."
-
-  %preun
-  %systemd_preun azfilesrefresh.service
-
-  %postun
-  %systemd_postun_with_restart azfilesrefresh.service
-
-  %changelog
-  * Thu Feb 20 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
-  - Initial RPM release
+  ```bash
+  cp rpm.spec ~/rpmbuild/SPECS/azfilesauth.spec
   ```
 
   #### Trigger the build
