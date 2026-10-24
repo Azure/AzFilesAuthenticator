@@ -2,3 +2,5 @@
 # ENVIRONMENT:
 #   MSI_ENDPOINT: http://localhost:40342/metadata/identity/oauth2/token
 #   MSI_SECRET: replace-with-secret
+# Optional Python virtual environment. Omit to use system Python.
+# PYTHON_VENV_PATH: /opt/azfilesauth/venv

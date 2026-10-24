@@ -1,7 +1,9 @@
 # Test azfilesauth RPM installation on RHEL 9
 FROM registry.access.redhat.com/ubi9/ubi:latest
 
-COPY *.rpm /tmp/
+COPY . /tmp/
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 # cifs-utils/keyutils aren't published in the free UBI repos, so pull them
 # from the ABI-compatible CentOS Stream BaseOS mirror.
@@ -10,6 +12,8 @@ RUN printf '[cs9-baseos]\nname=CentOS Stream 9 BaseOS\nbaseurl=https://mirror.st
     dnf -y install cifs-utils keyutils && \
     dnf -y install --allowerasing /tmp/azfilesauth-*.x86_64.rpm && \
     dnf clean all
+
+RUN printf 'PYTHON_VENV_PATH: /opt/azfilesauth/venv\n' >> /etc/azfilesauth/config.yaml
 
 # Validate
 RUN echo "=== Package info ===" && rpm -qi azfilesauth && \

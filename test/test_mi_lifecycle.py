@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -153,17 +154,21 @@ def unmount_if_mounted(mount_point):
 
 
 def manage_refresh_service(action):
-    if shutil.which("systemctl"):
+    if Path("/run/systemd/system").is_dir() and shutil.which("systemctl"):
         run_cmd(["systemctl", action, "azfilesrefresh"], check=True)
 
 
 def write_and_read_probe(mount_point, tag):
-    probe_path = Path(mount_point) / f"azfiles_probe_{tag}.txt"
+    probe_path = Path(mount_point) / f"azfiles_probe_{tag}_{uuid.uuid4().hex}.txt"
     payload = f"probe-{tag}-{int(time.time())}"
-    probe_path.write_text(payload, encoding="utf-8")
-    actual = probe_path.read_text(encoding="utf-8").strip()
-    if actual != payload:
-        raise RuntimeError("Mount accessibility check failed: probe content mismatch")
+    try:
+        probe_path.write_text(payload, encoding="utf-8")
+        actual = probe_path.read_text(encoding="utf-8").strip()
+        if actual != payload:
+            raise RuntimeError("Mount accessibility check failed: probe content mismatch")
+    finally:
+        if probe_path.exists():
+            probe_path.unlink()
 
 
 def scenario_authenticate(endpoint, mode, user_mi_client_id):

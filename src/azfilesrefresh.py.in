@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 
 import sys
-
-sys.path.insert(0, "@PYTHON_SITE_PKG@")
-
-from azfilesauth import azfiles_set_oauth, get_oauth_token, init_new_user
-import subprocess
 import os
+
+sys.path.insert(0, "@AZFILESAUTH_RUNTIME_DIR@")
+
+if __name__ == "__main__":
+    from azfilesauthbootstrap import bootstrap
+    bootstrap()
+
+from azfilesauthmanager import azfiles_set_oauth, get_oauth_token, init_new_user
+import subprocess
 import json
 import time
 import signal

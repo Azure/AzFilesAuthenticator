@@ -7,6 +7,8 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 | Test surface | Command or caller | Runs by default? | External requirements |
 | --- | --- | --- | --- |
 | `test_unit.py` | `python3 test/test_unit.py` | Yes in `run_e2e_tests.sh` and package-container tests | Python, mocked native dependencies |
+| `test_bootstrap.py` | `python3 test/test_bootstrap.py` | Yes in `run_e2e_tests.sh` and package-container tests | Python; no root or network required |
+| `test_runtime_dependencies.py` | `RUN_RUNTIME_DEPENDENCY_TESTS=1 ./test/run_e2e_tests.sh` | Yes in `deploy/run_e2e_in_container.sh`; otherwise opt-in | Disposable root Docker container, installed package, venv support, pip, package-index access |
 | `test_imports.py` | `python3 test/test_imports.py` | Yes in `run_e2e_tests.sh` | Python |
 | `test_mi_lifecycle.py` | `RUN_MI_LIFECYCLE_TESTS=1 ./test/run_e2e_tests.sh` | No; opt-in | Root, installed package, Azure identity, CIFS, Kerberos, Azure resources |
 | `tests.py` | `./test/run_e2e_tests.sh` when `test/test_config.yaml` exists | No; conditional legacy path | Root, `requests`, client-secret config, mounted Azure Files share |
@@ -16,6 +18,39 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 | `list_cred_op` | Fixture/sample JSON | Not a test | None |
 
 `run_e2e_tests.sh` runs static checks and unit tests on every invocation. It marks the lifecycle and legacy suites as passed when they are skipped, so a successful runner exit does not prove those suites executed.
+
+## Runtime dependency tests
+
+`test_bootstrap.py` covers dependency-first startup without pip, missing dependencies,
+installation and verification failures, venv creation and pip bootstrap,
+unsafe paths, native configuration errors, serialized startup, interpreter
+re-execution, and stderr-only setup errors.
+
+Package-container tests install only the package and native test prerequisites,
+then configure `PYTHON_VENV_PATH: /opt/azfilesauth/venv` before the first command.
+Venv support must come from the package's automatic prerequisites, not manual
+Python/pip provisioning in the test image. The real-SMB runner installs system
+pip only after this initial validation, to exercise the system-install branch.
+Dependency
+imports and Python tests run with that venv's interpreter rather than system
+Python. Package installation itself must not install Python requirements.
+
+The root `.dockerignore` excludes generated autotools files, native objects,
+staged package trees, venvs, and old artifacts so building the distro images
+from a previously built worktree does not reuse host-specific build output.
+
+The installed runtime suite checks concurrent venv creation (including spaces in
+the path), minimum-version/import verification, offline restart, missing-pip
+recovery inside a venv, daemon-first setup, CLI JSON output, fatal CLI/daemon
+installation failures, invalid/unsafe configuration, system Python with and
+without pip (both ready and missing dependencies), PEP 668 rejection, and
+installed package dependency/hook metadata.
+It restores the original configuration and deletes only its own temporary venvs.
+It must never be run on a shared host: it temporarily hides system pip and can
+install system dependencies inside the disposable test container.
+
+Set `PYTHON` to the configured venv interpreter when running the shell test runner;
+it uses that interpreter for static, unit, runtime, and SMB lifecycle suites.
 
 ## Unit Tests: `test_unit.py`
 

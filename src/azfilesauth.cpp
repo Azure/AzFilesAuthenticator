@@ -110,6 +110,27 @@ static bool read_yaml_scalar(const std::string& key, std::string& value, std::st
     return success;
 }
 
+extern "C" int extern_azfilesauth_venv_path(char* value, size_t value_size,
+                                           char* error, size_t error_size) {
+    if (!value || !value_size || !error || !error_size) {
+        return EINVAL;
+    }
+    value[0] = '\0';
+    error[0] = '\0';
+    std::string path;
+    std::string message;
+    if (!read_yaml_scalar("PYTHON_VENV_PATH", path, message)) {
+        std::snprintf(error, error_size, "%s", message.c_str());
+        return EINVAL;
+    }
+    if (path.find('\0') != std::string::npos || path.size() >= value_size) {
+        std::snprintf(error, error_size, "PYTHON_VENV_PATH contains a NUL or exceeds the path buffer");
+        return EINVAL;
+    }
+    std::memcpy(value, path.c_str(), path.size() + 1);
+    return 0;
+}
+
 // Logging-free wrapper to avoid recursion during logger initialization.
 static std::string read_config_value_raw(const std::string& key) {
     std::string value;
@@ -1158,4 +1179,3 @@ int extern_smb_list_credential(bool is_json) {
 const char* extern_smb_version() {
     return AZFILESAUTH_VERSION;
 }
-

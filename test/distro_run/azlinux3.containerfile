@@ -1,10 +1,14 @@
 # Test azfilesauth RPM installation on Azure Linux 3
 FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
-COPY *.rpm /tmp/
+COPY . /tmp/
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 RUN tdnf -y install shadow-utils /tmp/azfilesauth-*.x86_64.rpm && \
     tdnf clean all
+
+RUN printf 'PYTHON_VENV_PATH: /opt/azfilesauth/venv\n' >> /etc/azfilesauth/config.yaml
 
 # Validate
 RUN echo "=== Package info ===" && rpm -qi azfilesauth && \

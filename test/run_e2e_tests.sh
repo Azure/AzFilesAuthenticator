@@ -43,6 +43,8 @@ USER_MI_CLIENT_ID="${USER_MI_CLIENT_ID:-}"
 WORKLOAD_CLIENT_ID="${WORKLOAD_CLIENT_ID:-}"
 WORKLOAD_TOKEN_FILE="${WORKLOAD_TOKEN_FILE:-}"
 RUN_MI_LIFECYCLE_TESTS="${RUN_MI_LIFECYCLE_TESTS:-0}"
+RUN_RUNTIME_DEPENDENCY_TESTS="${RUN_RUNTIME_DEPENDENCY_TESTS:-0}"
+PYTHON="${PYTHON:-python3}"
 
 # VM connection
 VM_IP="${VM_IP:-20.219.7.207}"
@@ -142,8 +144,8 @@ if [ ! -f "$TEST_DIR/test_imports.py" ]; then
     exit 1
 fi
 
-if [ ! -f "$TEST_DIR/test_unit.py" ]; then
-    print_error "test_unit.py not found at $TEST_DIR"
+if [ ! -f "$TEST_DIR/test_unit.py" ] || [ ! -f "$TEST_DIR/test_bootstrap.py" ]; then
+    print_error "Unit or runtime bootstrap tests not found at $TEST_DIR"
     exit 1
 fi
 
@@ -182,7 +184,7 @@ print_header "Running Static and Unit Tests"
 print_info "Running test_imports.py..."
 echo ""
 
-if python3 "$TEST_DIR/test_imports.py"; then
+if "$PYTHON" "$TEST_DIR/test_imports.py"; then
     print_success "Static analysis tests completed"
     IMPORTS_RESULT=0
 else
@@ -193,15 +195,26 @@ fi
 # Run unit tests
 print_header "Running Unit Tests"
 
-print_info "Running test_unit.py..."
+print_info "Running unit and runtime bootstrap tests..."
 echo ""
 
-if python3 "$TEST_DIR/test_unit.py"; then
+if "$PYTHON" -m unittest discover -s "$TEST_DIR" -p 'test_[ub]*.py'; then
     print_success "Unit tests completed"
     UNIT_RESULT=0
 else
     print_error "Unit tests failed"
     UNIT_RESULT=1
+fi
+
+RUNTIME_RESULT=0
+if [ "$RUN_RUNTIME_DEPENDENCY_TESTS" = "1" ]; then
+    print_header "Running Installed Runtime Dependency Scenarios"
+    if "$PYTHON" "$TEST_DIR/test_runtime_dependencies.py"; then
+        print_success "Runtime dependency scenarios completed"
+    else
+        print_error "Runtime dependency scenarios failed"
+        RUNTIME_RESULT=1
+    fi
 fi
 
 print_header "Running Managed Identity Lifecycle Scenarios"
@@ -210,7 +223,7 @@ if [ "$RUN_MI_LIFECYCLE_TESTS" = "1" ]; then
     print_info "Running test_mi_lifecycle.py against $FILE_ENDPOINT..."
     echo ""
 
-    if python3 "$TEST_DIR/test_mi_lifecycle.py" "$FILE_ENDPOINT" --storage-account "$STORAGE_ACCOUNT" --file-share "$FILE_SHARE"; then
+    if "$PYTHON" "$TEST_DIR/test_mi_lifecycle.py" "$FILE_ENDPOINT" --storage-account "$STORAGE_ACCOUNT" --file-share "$FILE_SHARE"; then
         print_success "Managed identity lifecycle scenarios completed"
         MI_RESULT=0
     else
@@ -228,7 +241,7 @@ if [ -f "$TEST_DIR/test_config.yaml" ]; then
     print_info "Running tests.py run ${FILE_ENDPOINT}..."
     echo ""
 
-    if python3 "$TEST_DIR/tests.py" run "$FILE_ENDPOINT"; then
+    if "$PYTHON" "$TEST_DIR/tests.py" run "$FILE_ENDPOINT"; then
         print_success "Legacy integration tests completed"
         LEGACY_RESULT=0
     else
@@ -272,13 +285,18 @@ IMPORTS_STATUS=$([ $IMPORTS_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" 
 UNIT_STATUS=$([ $UNIT_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
 LEGACY_STATUS=$([ $LEGACY_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
 MI_STATUS=$([ $MI_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
+RUNTIME_STATUS=$([ $RUNTIME_RESULT -eq 0 ] && printf "%b" "${GREEN}PASSED${NC}" || printf "%b" "${RED}FAILED${NC}")
+[ "$RUN_MI_LIFECYCLE_TESTS" = "1" ] || MI_STATUS="SKIPPED (not enabled)"
+[ "$RUN_RUNTIME_DEPENDENCY_TESTS" = "1" ] || RUNTIME_STATUS="SKIPPED (not enabled)"
+[ -f "$TEST_DIR/test_config.yaml" ] || LEGACY_STATUS="SKIPPED (no client-secret test configuration)"
 echo -e "Static Tests (test_imports.py): ${IMPORTS_STATUS}"
 echo -e "Unit Tests (test_unit.py): ${UNIT_STATUS}"
 echo -e "MI Lifecycle (test_mi_lifecycle.py): ${MI_STATUS}"
+echo -e "Runtime Dependencies (test_runtime_dependencies.py): ${RUNTIME_STATUS}"
 echo -e "Legacy Integration (tests.py): ${LEGACY_STATUS}"
 
-if [ $IMPORTS_RESULT -eq 0 ] && [ $UNIT_RESULT -eq 0 ] && [ $MI_RESULT -eq 0 ] && [ $LEGACY_RESULT -eq 0 ]; then
-    print_success "All tests PASSED ✓"
+if [ $IMPORTS_RESULT -eq 0 ] && [ $UNIT_RESULT -eq 0 ] && [ $MI_RESULT -eq 0 ] && [ $LEGACY_RESULT -eq 0 ] && [ $RUNTIME_RESULT -eq 0 ]; then
+    print_success "All enabled tests PASSED ✓"
     exit 0
 else
     print_error "Some tests FAILED ✗"

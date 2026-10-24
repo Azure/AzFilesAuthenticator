@@ -17,6 +17,7 @@ bin_SCRIPTS = azfilesauthmanager azfilesrefresh
 # Create Python package directory
 pymoduledir = $(PYTHON_SITE_PKG)/azfilesauth
 pymodule_PYTHON = src/azfilesauthmanager.py 
+dist_pkgdata_DATA = src/azfilesauthbootstrap.py src/azfilesauthmanager.py requirements.txt
 
 # Create __init__.py to make the directory a Python package
 install-data-hook:
@@ -32,12 +33,12 @@ systemddir = /etc/systemd/system
 systemd_DATA = src/azfilesrefresh.service
 
 # Ensure scripts are installed without .py extension
-azfilesauthmanager: src/azfilesauthmanager.py
-	cp $< $@
+azfilesauthmanager: src/azfilesauthmanager.py Makefile
+	sed -e '1c\#!$(PYTHON)' -e 's|@AZFILESAUTH_RUNTIME_DIR@|$(pkgdatadir)|g' $< > $@
 	chmod +x $@
 
-azfilesrefresh: src/azfilesrefresh.py
-	cp $< $@
+azfilesrefresh: src/azfilesrefresh.py Makefile
+	sed -e '1c\#!$(PYTHON)' -e 's|@AZFILESAUTH_RUNTIME_DIR@|$(pkgdatadir)|g' $< > $@
 	chmod +x $@
 
 EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service config/config.yaml
