@@ -73,7 +73,7 @@ extends:
 
           steps:
             - checkout: self
-              path: AzFilesAuthenticator
+              path: AzFilesAuthenticator-ghsa-fxrq-436w-4mjr
               displayName: 'Checkout Repository'
 
             - script: |
@@ -181,7 +181,7 @@ extends:
               displayName: "Install Git if needed"
           
             - checkout: self
-              path: AzFilesAuthenticator
+              path: AzFilesAuthenticator-ghsa-fxrq-436w-4mjr
               displayName: 'Checkout Repository'
 
             - script: |
