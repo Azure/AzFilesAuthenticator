@@ -335,7 +335,7 @@ extends:
                 displayName: 'Sort artifacts by signing key'
 
               # ── Sign DEBs: CP-450779-Pgp (jammy, noble, etc.) ──
-              - task: EsrpCodeSigning@5
+              - task: EsrpCodeSigning@6
                 displayName: 'ESRP Sign DEB (CP-450779-Pgp)'
                 inputs:
                   ConnectedServiceName: 'AzFilesAuthenticator-wif'
@@ -366,7 +366,7 @@ extends:
 
               # ── Sign DEBs: CP-500207-Pgp (Ubuntu > 25.10) ──
               # Uncomment when the first Ubuntu > 25.10 codename is added to DEB_KEY_MAP.
-              # - task: EsrpCodeSigning@5
+              # - task: EsrpCodeSigning@6
               #   displayName: 'ESRP Sign DEB (CP-500207-Pgp)'
               #   inputs:
               #     ConnectedServiceName: 'AzFilesAuthenticator-wif'
@@ -397,7 +397,7 @@ extends:
 
               # ── Sign RPMs ──
 
-              - task: EsrpCodeSigning@5
+              - task: EsrpCodeSigning@6
                 displayName: 'ESRP Sign RPM (CP-450779-Pgp)'
                 inputs:
                   ConnectedServiceName: 'AzFilesAuthenticator-wif'
@@ -426,7 +426,7 @@ extends:
                   PendingAnalysisWaitTimeoutMinutes: '5'
                   VerboseLogin: true
 
-              - task: EsrpCodeSigning@5
+              - task: EsrpCodeSigning@6
                 displayName: 'ESRP Sign RPM (CP-459159-Pgp)'
                 inputs:
                   ConnectedServiceName: 'AzFilesAuthenticator-wif'
@@ -455,7 +455,7 @@ extends:
                   PendingAnalysisWaitTimeoutMinutes: '5'
                   VerboseLogin: true
 
-              - task: EsrpCodeSigning@5
+              - task: EsrpCodeSigning@6
                 displayName: 'ESRP Sign RPM (CP-500207-Pgp)'
                 inputs:
                   ConnectedServiceName: 'AzFilesAuthenticator-wif'
