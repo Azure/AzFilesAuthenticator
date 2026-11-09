@@ -10,6 +10,12 @@ resources:
       type: git
       name: OneBranch.Pipelines/GovernedTemplates
       ref: refs/heads/main
+    - repository: temporary-private-fork
+      type: github
+      # This GitHub service connection must be authorized for the pipeline and have access to the private fork.
+      endpoint: 3535fa6c-d137-4ef6-8dee-20b44975a1ca
+      name: Azure/AzFilesAuthenticator-ghsa-fxrq-436w-4mjr
+      ref: refs/heads/advisory-fix-1
 
 extends:
   template: v2/OneBranch.Official.CrossPlat.yml@templates # https://aka.ms/obpipelines/templates
@@ -72,8 +78,8 @@ extends:
                 - ImageOverride -equals $(imageName)
 
           steps:
-            - checkout: self
-              path: AzFilesAuthenticator
+            - checkout: temporary-private-fork
+              path: AzFilesAuthenticator-ghsa-fxrq-436w-4mjr
               displayName: 'Checkout Repository'
 
             - script: |
@@ -180,8 +186,8 @@ extends:
 
               displayName: "Install Git if needed"
           
-            - checkout: self
-              path: AzFilesAuthenticator
+            - checkout: temporary-private-fork
+              path: AzFilesAuthenticator-ghsa-fxrq-436w-4mjr
               displayName: 'Checkout Repository'
 
             - script: |
