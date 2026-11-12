@@ -42,6 +42,7 @@ The Azure Files Authentication Manager is a command-line utility and library des
 - [Security Notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
 - [Packaging](#packaging)
+  - [Changelog and Releases](#changelog-and-releases)
   - [RPM Package](#rpm-package)
   - [.deb package](#deb-package)
 - [Building from Source](#building-from-source)
@@ -445,6 +446,46 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
 
 ## Packaging
 
+### Changelog and Releases
+
+[CHANGELOG.md](CHANGELOG.md) is the source of truth for release notes. The native
+RPM and Debian changelogs are generated and checked in; do not edit them directly.
+Historical entries are reconstructed from version-setting commits; see the
+changelog's provenance table and notes about early version gaps.
+
+For each release:
+
+1. Collect user-visible changes under `## [Unreleased]`.
+2. Move those notes into `## [major.minor-release] - YYYY-MM-DD`, newest first.
+   Use optional `### Category` headings and single-line `- ` bullets.
+3. Run `bash ./update-version.sh <major.minor> <release>`. It generates package
+   changelogs and updates version files, refusing a bump without matching notes.
+4. Commit the release notes, generated changelogs, and version changes together.
+   RPM build scripts archive committed sources from `HEAD`.
+
+To regenerate notes without changing the version, run
+`bash ./update-changelog.sh --write`. To verify synchronization, run
+`bash ./update-changelog.sh --check`; packaging scripts run this check before
+building. The maintainer identity comes from [debian/control](debian/control).
+
+Query release notes without installing a package:
+
+```bash
+rpm -qp --changelog ./azfilesauth-<version>.<arch>.rpm
+dpkg-deb --fsys-tarfile ./azfilesauth_<version>_<arch>.deb \
+  | tar -xO ./usr/share/doc/azfilesauth/changelog.Debian.gz | gzip -dc
+```
+
+For installed packages:
+
+```bash
+rpm -q --changelog azfilesauth
+zcat /usr/share/doc/azfilesauth/changelog.Debian.gz
+```
+
+Both package formats also ship the Markdown changelog as documentation. Existing
+published packages are unchanged; updated notes appear in newly built packages.
+
 ### RPM Package
 
   Building for RPM requires a machine which uses RPM packages (RHEL, Azure Linux, etc.). The following steps were followed for preparing the RPM package:
@@ -481,77 +522,12 @@ sudo mount -t cifs //<storage>.file.core.windows.net/<share> /mnt/smb \
   ```
 
   #### Configure the build pipeline
-  We are now ready to setup the build specification. To do the same, create and open a file in the `SPEC` folder, and populate with the given config. In this case, since the package is `azfilesauth`, the spec file is called `azfilesauth.spec`.
-  
-  >**NOTE**: It is important to have your project configured to be built with automake tools, i.e. `autoreconf -i`, `sudo make`, `sudo make install`. 
+  Use the maintained [RPM specification](rpm.spec), including its generated
+  `%changelog`, rather than creating a separate specification:
 
-  ```text
-  Name:           azfilesauth
-  Version:        1.0
-  Release:        1%{?dist}
-  Summary:        Azure Files Authentication Library
-  License:        MIT
-  URL:            https://example.com
-  Source0:        %{name}-%{version}.tar.gz
-  BuildRequires:  gcc-c++, make, automake, autoconf, libtool, curl-devel, krb5-devel, python3, glibc-devel, binutils, kernel-headers, chrpath, systemd-rpm-macros
-  Requires:       curl, krb5-libs, python3, python3-pip
-
-  %description
-  Azure Files Authentication Library provides a C++ library with a Python script to manage authentication.
-
-  %global _hardened_build 1  # Enable security hardening
-
-  %prep
-  %setup -q
-
-  %build
-  # Run autotools-based build
-  autoreconf -i
-  %configure --prefix=%{_prefix} --libdir=%{_libdir}
-  make
-
-  %install
-  rm -rf %{buildroot}
-  make DESTDIR=%{buildroot} install
-
-  # Ensure the config directory is created
-  mkdir -p %{buildroot}/etc/azfilesauth
-  install -m 600 config/config.yaml %{buildroot}/etc/azfilesauth/config.yaml
-
-  # Ensure the license directory exists and install LICENSE
-  mkdir -p %{buildroot}%{_licensedir}/%{name}
-  install -m 644 LICENSE %{buildroot}%{_licensedir}/%{name}/
-
-  # -- Remove RPATH (Only if the library exists) --
-  if [ -f "%{buildroot}%{_libdir}/libazfilesauth.so.0.0.0" ]; then
-      chrpath --delete %{buildroot}%{_libdir}/libazfilesauth.so.0.0.0
-  fi
-
-  %files
-  %license %{_licensedir}/%{name}/LICENSE
-  %doc README.md
-  %{_libdir}/libazfilesauth.so*
-  %{_libdir}/libazfilesauth.la
-  %{_bindir}/azfilesauthmanager
-  %config(noreplace) /etc/azfilesauth/config.yaml
-
-  %post
-  %systemd_post azfilesrefresh.service
-  # Install Azure Python SDK via pip (azure-identity not available in standard repos)
-  python3 -c "import azure.identity" 2>/dev/null || \
-      python3 -m pip install --quiet "azure-identity>=1.14.0" "azure-core>=1.26.0" 2>/dev/null || \
-      python3 -m pip install --quiet --break-system-packages "azure-identity>=1.14.0" "azure-core>=1.26.0" || \
-      echo "WARNING: azure-identity could not be installed."
-
-  %preun
-  %systemd_preun azfilesrefresh.service
-
-  %postun
-  %systemd_postun_with_restart azfilesrefresh.service
-
-  %changelog
-  * Thu Feb 20 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
-  - Initial RPM release
+  ```bash
+  bash ./update-changelog.sh --check
+  cp rpm.spec ~/rpmbuild/SPECS/azfilesauth.spec
   ```
 
   #### Trigger the build

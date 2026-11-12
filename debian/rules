@@ -19,3 +19,6 @@ override_dh_install:
 override_dh_fixperms:
 	dh_fixperms --exclude=etc/azfilesauth/config.yaml
 	chmod 0600 debian/azfilesauth/etc/azfilesauth/config.yaml
+
+override_dh_installchangelogs:
+	dh_installchangelogs CHANGELOG.md

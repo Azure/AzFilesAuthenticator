@@ -1,6 +1,8 @@
 #!/bin/bash
 set -xeuo pipefail
 
+bash ./update-changelog.sh --check
+
 if command -v tdnf >/dev/null 2>&1; then
     echo "Azure Linux (tdnf found)"
     PKG=tdnf
