@@ -40,7 +40,7 @@ azfilesrefresh: src/azfilesrefresh.py
 	cp $< $@
 	chmod +x $@
 
-EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service config/config.yaml
+EXTRA_DIST = src/azfilesauthmanager.py src/azfilesrefresh.py config/azfilesrefresh.service config/config.yaml CHANGELOG.md
 CLEANFILES = azfilesauthmanager azfilesrefresh
 
 # Native self-tests (make check)

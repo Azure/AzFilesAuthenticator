@@ -21,6 +21,10 @@ BUILD_DIR="$SCRIPT_DIR/build"
 RUN_DIR="$SCRIPT_DIR/distro_run"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
 
+bash "$REPO_ROOT/update-changelog.sh" --check
+PACKAGE_VERSION=$(sed -n '1s/.*(\(.*\)).*/\1/p' "$REPO_ROOT/debian/changelog")
+RELEASE_NOTE=$(sed -n '/^  \* / {s/^  \* //; p; q;}' "$REPO_ROOT/debian/changelog")
+
 # All supported distros (must have matching Dockerfiles in build/ and distro_run/)
 ALL_DISTROS=(ubuntu20 ubuntu22 ubuntu24 sles15 rhel9 rhel10 azlinux3)
 
@@ -144,6 +148,25 @@ for distro in "${DISTROS[@]}"; do
     tail -20 "$run_log"
     rm -f "$run_log"
     pass "[$distro] Package installed and validated"
+
+    log "[$distro] Checking installed package changelog..."
+    if [ "$pkg_type" = "rpm" ]; then
+        changelog_command=(rpm -q --changelog azfilesauth)
+    else
+        changelog_command=(zcat /usr/share/doc/azfilesauth/changelog.Debian.gz)
+    fi
+    if changelog_output=$(docker run --rm "$run_tag" "${changelog_command[@]}") &&
+       grep -Fq -- "$PACKAGE_VERSION" <<< "$changelog_output" &&
+       grep -Fq -- "$RELEASE_NOTE" <<< "$changelog_output"; then
+        pass "[$distro] Changelog contains the current version and release notes"
+        passed=$((passed + 1))
+        results+=("PASS  $distro  changelog")
+    else
+        fail "[$distro] Package changelog is missing or stale"
+        failed=$((failed + 1))
+        results+=("FAIL  $distro  changelog")
+        continue
+    fi
 
     # --- Step 4: Validate config ownership and permissions ---
     log "[$distro] Checking config ownership and permissions..."

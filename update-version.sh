@@ -11,11 +11,8 @@ NEW_VERSION="$1"   # e.g. 1.0
 NEW_RELEASE="$2"   # e.g. 2
 DEB_VERSION="${NEW_VERSION}-${NEW_RELEASE}"
 
-# --- Update debian/changelog ---
-if [[ -f debian/changelog ]]; then
-    sed -i "1s|(.*)|(${DEB_VERSION})|" debian/changelog
-    echo "Updated debian/changelog → ${DEB_VERSION}"
-fi
+# Generate release history before changing versions; fail if release notes are missing.
+bash ./update-changelog.sh --write "$DEB_VERSION"
 
 # --- Update rpm.spec ---
 if [[ -f rpm.spec ]]; then
