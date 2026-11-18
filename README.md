@@ -103,6 +103,16 @@ sudo apt-get update
 sudo apt-get install -y azfilesauth
 ```
 
+#### Ubuntu 26.04 (Resolute)
+
+```bash
+curl -sSL -O https://packages.microsoft.com/config/ubuntu/26.04/packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+rm packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install -y azfilesauth
+```
+
 #### RHEL 9.6+ / RHEL 10.1+
 
 ```bash
@@ -688,6 +698,7 @@ A Docker-based test framework is provided to locally build and validate packages
 |---|---|
 | Ubuntu 22.04 (Jammy) | DEB |
 | Ubuntu 24.04 (Noble) | DEB |
+| Ubuntu 26.04 (Resolute) | DEB |
 | SLES 15 SP6 | RPM |
 | RHEL 9 | RPM |
 | Azure Linux 3 | RPM |

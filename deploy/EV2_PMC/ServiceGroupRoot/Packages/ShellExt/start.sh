@@ -62,8 +62,10 @@ echo "3b) Verify package artifacts are present"
 ls -l packages/ || { echo "ERROR: packages/ missing"; exit 1; }
 check_package azfilesauth_1.0-13_amd64.jammy.deb
 check_package azfilesauth_1.0-13_amd64.noble.deb
+check_package azfilesauth_1.0-13_amd64.resolute.deb
 check_package azfilesauth_1.0-13_arm64.jammy.deb
 check_package azfilesauth_1.0-13_arm64.noble.deb
+check_package azfilesauth_1.0-13_arm64.resolute.deb
 check_package azfilesauth-1.0-13.azl3.x86_64.rpm
 check_package azfilesauth-1.0-13.azl3.aarch64.rpm
 check_package azfilesauth-1.0-13.el9.x86_64.rpm
@@ -76,6 +78,7 @@ check_package azfilesauth-1.0-13.aarch64.rpm
 echo "3c) Verify target repos exist"
 check_repo microsoft-ubuntu-jammy-prod-apt
 check_repo microsoft-ubuntu-noble-prod-apt
+check_repo microsoft-ubuntu-resolute-prod-apt
 check_repo azurelinux-3.0-prod-ms-oss-x86_64-yum
 check_repo azurelinux-3.0-prod-ms-oss-aarch64-yum
 check_repo microsoft-rhel9.0-prod-yum
@@ -152,12 +155,14 @@ else
     # publish_package "azfilesauth_1.0-13_amd64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_amd64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
     publish_package "azfilesauth_1.0-13_amd64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_amd64.jammy.deb -> microsoft-ubuntu-jammy-prod-apt (jammy)"
     publish_package "azfilesauth_1.0-13_amd64.noble.deb" microsoft-ubuntu-noble-prod-apt noble || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_amd64.noble.deb -> microsoft-ubuntu-noble-prod-apt (noble)"
+    publish_package "azfilesauth_1.0-13_amd64.resolute.deb" microsoft-ubuntu-resolute-prod-apt resolute || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_amd64.resolute.deb -> microsoft-ubuntu-resolute-prod-apt (resolute)"
 
     echo "Publish arm deb packages"
     # TODO: focal commented out due to issue with "debconf: unable to initialize frontend: Dialog"
     # publish_package "azfilesauth_1.0-13_arm64.focal.deb" microsoft-ubuntu-focal-prod-apt focal || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_arm64.focal.deb -> microsoft-ubuntu-focal-prod-apt (focal)"
     publish_package "azfilesauth_1.0-13_arm64.jammy.deb" microsoft-ubuntu-jammy-prod-apt jammy || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_arm64.jammy.deb -> microsoft-ubuntu-jammy-prod-apt (jammy)"
     publish_package "azfilesauth_1.0-13_arm64.noble.deb" microsoft-ubuntu-noble-prod-apt noble || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_arm64.noble.deb -> microsoft-ubuntu-noble-prod-apt (noble)"
+    publish_package "azfilesauth_1.0-13_arm64.resolute.deb" microsoft-ubuntu-resolute-prod-apt resolute || FAILURES="${FAILURES}${NL}  - azfilesauth_1.0-13_arm64.resolute.deb -> microsoft-ubuntu-resolute-prod-apt (resolute)"
 
     echo "Publish Az linux 3 packages"
     publish_package "azfilesauth-1.0-13.azl3.x86_64.rpm" azurelinux-3.0-prod-ms-oss-x86_64-yum || FAILURES="${FAILURES}${NL}  - azfilesauth-1.0-13.azl3.x86_64.rpm -> azurelinux-3.0-prod-ms-oss-x86_64-yum"

@@ -22,13 +22,14 @@ RUN_DIR="$SCRIPT_DIR/distro_run"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
 
 # All supported distros (must have matching Dockerfiles in build/ and distro_run/)
-ALL_DISTROS=(ubuntu20 ubuntu22 ubuntu24 sles15 rhel9 rhel10 azlinux3)
+ALL_DISTROS=(ubuntu20 ubuntu22 ubuntu24 ubuntu26 sles15 rhel9 rhel10 azlinux3)
 
 # Package type per distro
 declare -A PKG_TYPE=(
     [ubuntu20]=deb
     [ubuntu22]=deb
     [ubuntu24]=deb
+    [ubuntu26]=deb
     [sles15]=rpm
     [rhel9]=rpm
     [rhel10]=rpm

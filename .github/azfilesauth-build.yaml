@@ -47,6 +47,10 @@ extends:
                 poolHosted: 'azfilesauth-1es-pool'
                 imageName: 'azfilesauth-1es-ubuntu24'
                 releaseName: 'noble'
+              ubuntu26:
+                poolHosted: 'azfilesauth-1es-pool'
+                imageName: 'azfilesauth-1es-ubuntu26'
+                releaseName: 'resolute'
               ubuntu22Arm:
                 poolHosted: 'azfilesauth-1es-arm-pool'
                 imageName: 'azfilesauth-1es-ubuntu22-arm'
@@ -60,6 +64,10 @@ extends:
                 poolHosted: 'azfilesauth-1es-arm-pool'
                 imageName: 'azfilesauth-1es-ubuntu24-arm'
                 releaseName: 'noble'
+              ubuntu26Arm:
+                poolHosted: 'azfilesauth-1es-arm-pool'
+                imageName: 'azfilesauth-1es-ubuntu26-arm'
+                releaseName: 'resolute'
       
           variables:
             ob_artifactSuffix: $(imageName)
@@ -295,9 +303,8 @@ extends:
                   # ── Sort DEBs ──
                   DEB_DIR="$(Build.ArtifactStagingDirectory)/azfilesauth-deb"
                   declare -A DEB_KEY_MAP=(
-                    # Add Ubuntu > 25.10 codenames here as they release, e.g.:
-                    # ["plucky"]="CP-500207-Pgp"    # 25.10
-                    # ["questing"]="CP-500207-Pgp"  # 26.04
+                    # Ubuntu 25.10+ codenames use CP-500207-Pgp; add new ones here as they release.
+                    ["resolute"]="CP-500207-Pgp"  # 26.04
                   )
 
                   for pattern in "${!DEB_KEY_MAP[@]}"; do
@@ -364,36 +371,35 @@ extends:
                   PendingAnalysisWaitTimeoutMinutes: '5'
                   VerboseLogin: true
 
-              # ── Sign DEBs: CP-500207-Pgp (Ubuntu > 25.10) ──
-              # Uncomment when the first Ubuntu > 25.10 codename is added to DEB_KEY_MAP.
-              # - task: EsrpCodeSigning@6
-              #   displayName: 'ESRP Sign DEB (CP-500207-Pgp)'
-              #   inputs:
-              #     ConnectedServiceName: 'AzFilesAuthenticator-wif'
-              #     AppRegistrationClientId: '$(AppRegistrationClientId)'
-              #     AppRegistrationTenantId: '$(AppRegistrationTenantId)'
-              #     EsrpClientId: '$(AppRegistrationClientId)'
-              #     UseMSIAuthentication: true
-              #     AuthAKVName: '$(AuthAKVName)'
-              #     AuthSignCertName: '$(AuthSignCertName)'
-              #     FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-deb/CP-500207-Pgp'
-              #     Pattern: '*.deb'
-              #     signConfigType: 'inlineSignParams'
-              #     inlineOperation: |
-              #       [
-              #       {
-              #         "KeyCode": "CP-500207-Pgp",
-              #         "OperationCode": "LinuxSign",
-              #         "ToolName": "sign",
-              #         "ToolVersion": "1.0",
-              #         "Parameters": {}
-              #       }
-              #       ]
-              #     SessionTimeout: '90'
-              #     MaxConcurrency: '25'
-              #     MaxRetryAttempts: '5'
-              #     PendingAnalysisWaitTimeoutMinutes: '5'
-              #     VerboseLogin: true
+              # ── Sign DEBs: CP-500207-Pgp (Ubuntu 25.10+: resolute, etc.) ──
+              - task: EsrpCodeSigning@6
+                displayName: 'ESRP Sign DEB (CP-500207-Pgp)'
+                inputs:
+                  ConnectedServiceName: 'AzFilesAuthenticator-wif'
+                  AppRegistrationClientId: '$(AppRegistrationClientId)'
+                  AppRegistrationTenantId: '$(AppRegistrationTenantId)'
+                  EsrpClientId: '$(AppRegistrationClientId)'
+                  UseMSIAuthentication: true
+                  AuthAKVName: '$(AuthAKVName)'
+                  AuthSignCertName: '$(AuthSignCertName)'
+                  FolderPath: '$(Build.ArtifactStagingDirectory)/azfilesauth-deb/CP-500207-Pgp'
+                  Pattern: '*.deb'
+                  signConfigType: 'inlineSignParams'
+                  inlineOperation: |
+                    [
+                    {
+                      "KeyCode": "CP-500207-Pgp",
+                      "OperationCode": "LinuxSign",
+                      "ToolName": "sign",
+                      "ToolVersion": "1.0",
+                      "Parameters": {}
+                    }
+                    ]
+                  SessionTimeout: '90'
+                  MaxConcurrency: '25'
+                  MaxRetryAttempts: '5'
+                  PendingAnalysisWaitTimeoutMinutes: '5'
+                  VerboseLogin: true
 
               # ── Sign RPMs ──
 

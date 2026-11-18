@@ -305,7 +305,7 @@ Run with Docker:
 ./test/test_package_builds.sh ubuntu22 rhel9
 ```
 
-For each selected distro (`ubuntu20`, `ubuntu22`, `ubuntu24`, `sles15`, `rhel9`, `rhel10`, `azlinux3`) it:
+For each selected distro (`ubuntu20`, `ubuntu22`, `ubuntu24`, `ubuntu26`, `sles15`, `rhel9`, `rhel10`, `azlinux3`) it:
 
 1. Builds the package using the matching `test/build/*.containerfile`.
 2. Extracts and checks that a package artifact exists.
