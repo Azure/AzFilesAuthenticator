@@ -38,13 +38,13 @@ lib = load_lib()
 
 
 # Define the function signatures
-lib.extern_smb_set_credential_oauth_token.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint)]
+lib.extern_smb_set_credential_oauth_token.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint), ctypes.c_uint]
 lib.extern_smb_set_credential_oauth_token.restype = ctypes.c_int
 
 lib.extern_smb_clear_credential.argtypes = [ctypes.c_char_p]
 lib.extern_smb_clear_credential.restype = ctypes.c_int 
 
-lib.extern_smb_list_credential.argtypes = [ctypes.c_bool]
+lib.extern_smb_list_credential.argtypes = [ctypes.c_bool, ctypes.c_uint]
 
 config = {}
 

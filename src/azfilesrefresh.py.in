@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "@PYTHON_SITE_PKG@")
 
-from azfilesauth import azfiles_set_oauth, get_oauth_token, init_new_user
+from azfilesauth import azfiles_set_oauth, get_oauth_token, init_new_user, load_config
 import subprocess
 import os
 import json
@@ -20,6 +20,12 @@ MINUTES = 60 * SECONDS
 SLEEP_TIME = 60 * SECONDS
 REFRESH_BEFORE_EXPIRY = 5 * MINUTES 
 RUNNING = True
+
+# Directory that holds the per-identity krb5cc_<uid> credential caches (derived
+# from KRB5_CC_NAME). The fallback matches libazfilesauth's default
+# (/tmp/krb5cc_<uid>) when unset.
+DEFAULT_KERBEROS_DIR = "/tmp"
+CACHE_FILE_RE = re.compile(r"^krb5cc_(\d+)$")
 
 # Configure Logging
 logging.basicConfig(
@@ -63,9 +69,44 @@ def handle_shutdown(signum, frame):
 signal.signal(signal.SIGTERM, handle_shutdown)
 signal.signal(signal.SIGINT, handle_shutdown)
 
-def get_tickets():
+def get_kerberos_dir():
+    """Directory holding the per-identity krb5cc_<uid> caches, from KRB5_CC_NAME."""
     try:
-        result = subprocess.run(["azfilesauthmanager", "list", "--json"],
+        value = load_config().get("KRB5_CC_NAME")
+        if isinstance(value, str):
+            value = value.strip()
+            if value.startswith("FILE:"):
+                value = value[len("FILE:"):]
+            directory = os.path.dirname(value)
+            if directory:
+                return directory
+    except Exception as e:
+        log_error(f"Error reading KRB5_CC_NAME from config: {e}")
+    return DEFAULT_KERBEROS_DIR
+
+def get_cache_uids():
+    """Return every credential-cache uid currently present on disk (the suffix of
+    each krb5cc_<uid> file), always including 0 for the legacy shared cache. These
+    are the caches the daemon keeps refreshed."""
+    uids = {0}
+    kerberos_dir = get_kerberos_dir()
+    try:
+        for name in os.listdir(kerberos_dir):
+            m = CACHE_FILE_RE.match(name)
+            if m:
+                uids.add(int(m.group(1)))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log_error(f"Error listing kerberos dir {kerberos_dir}: {e}")
+    return uids
+
+def get_tickets(cache_uid=0):
+    try:
+        cmd = ["azfilesauthmanager", "list", "--json"]
+        if cache_uid:
+            cmd += ["--cache-uid", str(cache_uid)]
+        result = subprocess.run(cmd,
                                 check=True, capture_output=True)
         result_raw = result.stdout.decode('utf-8')
         tickets = json.loads(result_raw)
@@ -116,7 +157,25 @@ def get_endpoint_from_principal(principal_string: str):
     log_error(f"Invalid principal string: {principal_string}")
     return ""
 
+def canonicalize_endpoint(endpoint: str) -> str:
+    """Normalize a private-endpoint FQDN to the canonical Kerberos host.
+
+    For private endpoints the CIFS mount source keeps the privatelink FQDN
+    (e.g. account.privatelink.file.core.windows.net) while the Kerberos SPN /
+    ticket principal uses the canonical <account>.file.<suffix>. Mirror the
+    driver's getKerberosHost (.privatelink.file. -> .file.) so the endpoint key
+    derived from the mount matches the one derived from the ticket principal;
+    otherwise private-endpoint managed-identity caches would never be found and
+    would silently expire."""
+    return endpoint.replace(".privatelink.file.", ".file.", 1)
+
 def get_mount_options():
+    """Map each active Kerberos CIFS mount to its managed-identity username,
+    keyed by (endpoint, cruid). Only managed-identity mounts set username= in the
+    CIFS options, so workload-identity / direct-OAuth mounts (no username) are
+    intentionally absent here and are therefore not touched by this daemon. The
+    cruid is the per-identity credential-cache uid, so two different identities
+    mounting the same endpoint map to distinct keys."""
     result = subprocess.run(['mount', '-t', 'cifs'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     mount_output = result.stdout.decode('utf-8')
 
@@ -125,37 +184,48 @@ def get_mount_options():
         # Only consider CIFS mounts that explicitly use Kerberos auth
         if 'sec=krb5' not in line:
             continue
-        # Extract endpoint and username from this line
+        # Extract endpoint, username and cruid from this line
         m_ep = re.search(r'//([^/\s]+)', line)
         m_user = re.search(r'username=([^,\s)]+)', line)
+        m_cruid = re.search(r'cruid=(\d+)', line)
         if m_ep and m_user:
-            endpoint = m_ep.group(1)
+            endpoint = canonicalize_endpoint(m_ep.group(1))
             client_id = m_user.group(1)
-            id_map[endpoint] = client_id
+            cruid = int(m_cruid.group(1)) if m_cruid else 0
+            key = (endpoint, cruid)
+            # If two mounts disagree on the username for the same (endpoint, cruid),
+            # skip it rather than guess which username to use.
+            if key in id_map and id_map[key] != client_id:
+                log_error(f"Conflicting usernames for {endpoint} (cruid={cruid}); skipping refresh for it")
+                id_map[key] = None
+            elif key not in id_map:
+                id_map[key] = client_id
 
     return id_map
 
-def get_client_id(file_endpoint_uri):
-    id_map = None
+def get_client_id(file_endpoint_uri, cache_uid=0):
     try:
         id_map = get_mount_options()
-        return id_map.get(file_endpoint_uri)
+        return id_map.get((file_endpoint_uri, cache_uid))
     except Exception as e:
         log_error(f"Error getting mount options {e}")
 
     return
 
-def refresh_ticket(ticket):
+def refresh_ticket(ticket, cache_uid=0):
     try:
         endpoint = get_endpoint_from_principal(ticket['server'])
-        client_id = get_client_id(endpoint)
+        # Resolve the managed identity for THIS cache (endpoint + cruid). A cache
+        # with no matching managed-identity mount (stale, or a workload-identity /
+        # direct-OAuth cache this daemon cannot renew) is skipped.
+        client_id = get_client_id(endpoint, cache_uid)
         # If the mount used username=root we treat this as system-assigned identity
         # and do not require a client_id. Otherwise we use client_id for user-assigned MI.
         if client_id is None:
-            log_error(f"Skipping refresh. Username not found for endpoint: {endpoint}")
+            log_error(f"Skipping refresh. No managed-identity mount for endpoint {endpoint} (cache_uid={cache_uid})")
             return
 
-        log_status(f"Refresh token for {endpoint} initiated (mount username={client_id})")
+        log_status(f"Refresh token for {endpoint} initiated (mount username={client_id}, cache_uid={cache_uid})")
 
         if client_id == "root":
             log_status(f"username=root for {endpoint}; using system-assigned managed identity")
@@ -166,7 +236,15 @@ def refresh_ticket(ticket):
 
         if oauth_token is None:
             raise Exception(f"Unable to obtain OAuth token for {endpoint}")
-        result = azfiles_set_oauth("https://" + endpoint, oauth_token)
+        # Refresh into the same cache the mount uses (krb5cc_<cache_uid>; 0 is the
+        # legacy shared cache), so long-lived identity mounts keep valid tickets.
+        # azfiles_set_oauth calls sys.exit on a native failure; catch the resulting
+        # SystemExit so one failed refresh cannot kill the whole daemon.
+        try:
+            result = azfiles_set_oauth("https://" + endpoint, oauth_token, cache_uid=cache_uid)
+        except SystemExit as e:
+            log_error(f"Refresh failed for {endpoint} (cache_uid={cache_uid}); azfiles_set_oauth exited with {e.code}")
+            return
         log_status(f"Ticket for {endpoint} refreshed")
     except Exception as e:
         log_error(f"Error refreshing ticket: {e}")
@@ -176,11 +254,15 @@ def start_daemon():
     log_status("AZ Files Refresh Daemon started.")
     init_new_user()
     while RUNNING:
-        tickets = get_tickets()
         log_status("Checking for expiring tickets...")
-        for ticket in tickets:
-            if is_expiring(ticket):
-                refresh_ticket(ticket)
+        # Iterate every per-identity cache present on the node (krb5cc_<uid>),
+        # not just the shared krb5cc_0, so each identity's ticket is refreshed in
+        # its own cache. cache_uid 0 covers the legacy/system shared cache.
+        for cache_uid in sorted(get_cache_uids()):
+            tickets = get_tickets(cache_uid)
+            for ticket in tickets:
+                if is_expiring(ticket):
+                    refresh_ticket(ticket, cache_uid)
         log_status("Done checking. Sleeping...")
         time.sleep(SLEEP_TIME)
     log_status("Daemon exited.")

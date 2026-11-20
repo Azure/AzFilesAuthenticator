@@ -1,3 +1,31 @@
+azfilesauth (1.0-14) unstable; urgency=medium
+
+  * feat: per-identity Kerberos credential caches (krb5cc_<cruid>) so multiple
+    distinct identities (managed identity, workload identity, direct OAuth token)
+    can mount the same storage account on the same node, each with its own
+    credential cache instead of the single node-wide krb5cc_0.
+  * azfilesauthmanager gains an optional `--cache-uid <uid>` argument; the native
+    functions extern_smb_set_credential_oauth_token and extern_smb_list_credential
+    gain a trailing `unsigned int cache_uid` parameter. ABI CHANGE for direct
+    C/ctypes callers only, which must pass the new argument (0 keeps the previous
+    behavior). CLI users, including azurefile-csi-driver, are unaffected: the
+    bundled azfilesauthmanager is updated in this package.
+  * Per-identity caches are chowned to the owning uid and chmod 0600; for a
+    per-identity cache a chown/chmod failure returns an error (the kernel
+    cifs.upcall reads the cache as the cruid, so an un-owned cache is unusable).
+  * azfilesrefresh renews each per-identity cache in place and keys active mounts
+    by (endpoint, cruid), canonicalizing privatelink endpoints.
+  * feat: provision the per-identity passwd entry natively. For a non-zero cruid
+    that has no passwd entry, extern_smb_set_credential_oauth_token now writes an
+    inert stand-in entry (nologin shell, /nonexistent home) before dropping euid,
+    so cifs.upcall's getpwuid(cruid) resolves when it reads krb5cc_<cruid>. The
+    passwd file is coordinated with useradd/usermod via an fcntl lock on
+    <dir>/.pwd.lock (lckpwdf-compatible) and selectable with the new PASSWD_FILE
+    config key (default /etc/passwd; set to /host/etc/passwd when run in the
+    driver container so the host NSS that cifs.upcall consults is updated).
+
+ -- Roger Nhan <rogernhan@microsoft.com>  Fri, 20 Nov 2026 20:00:00 +0000
+
 azfilesauth (1.0-13) unstable; urgency=medium
 
   * Some fixes done
