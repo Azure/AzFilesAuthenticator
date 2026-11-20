@@ -30,10 +30,11 @@ extern "C" {
 
 	int extern_smb_set_credential_oauth_token(char* file_endpoint_uri,
 							char* auth_token,
-							unsigned int* credential_expires_in_seconds);
+							unsigned int* credential_expires_in_seconds,
+							unsigned int cache_uid);
 	int extern_smb_clear_credential(char* file_endpoint_uri);
 
-	int extern_smb_list_credential(bool is_json);
+	int extern_smb_list_credential(bool is_json, unsigned int cache_uid);
 
 	const char* extern_smb_version();
 

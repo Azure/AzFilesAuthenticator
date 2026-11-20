@@ -400,6 +400,30 @@ static int op_clear(uid_t uid, const std::string& host) {
     return smb_clear_credential("https://" + host, uid);
 }
 
+// Per-identity variants: what extern_* run for a non-zero cache_uid.
+static int op_set_pi(uid_t uid, const std::string& host, const std::string& key) {
+    std::string krbcred = make_krb_cred(host, key);
+    if (krbcred.empty()) return 2;
+    return smb_insert_credential("https://" + host, krbcred.data(), krbcred.size(), uid, true);
+}
+
+static int op_clear_pi(uid_t uid, const std::string& host) {
+    return smb_clear_credential("https://" + host, uid, true);
+}
+
+// Points the library at a config file holding body; returns the previous path.
+static const char* use_config(const std::string& dir, const std::string& body) {
+    static std::string cfg;
+    cfg = dir + "/config.yaml";
+    if (!write_file(cfg, body, 0600)) {
+        std::fprintf(stderr, "cannot write %s\n", cfg.c_str());
+        std::exit(2);
+    }
+    const char* saved = g_config_path;
+    g_config_path = cfg.c_str();
+    return saved;
+}
+
 struct Snap {
     bool exists = false;
     ino_t ino = 0;
@@ -568,16 +592,16 @@ static void custom_cache_config(uid_t uid, mode_t dir_mode) {
     CHECK(count(second.data, k1) >= 1 && count(second.data, k2) >= 1);
 
     // list shows both endpoints; clear removes one and restores the effective UID.
-    CHECK(capture([&] { return extern_smb_list_credential(false); }, &out, &err) == 0);
+    CHECK(capture([&] { return extern_smb_list_credential(false, 0); }, &out, &err) == 0);
     CHECK(geteuid() == uid);
     CHECK(out.find(kHost) != std::string::npos && out.find(host2) != std::string::npos);
-    CHECK(capture([&] { return extern_smb_list_credential(true); }, &out, &err) == 0);
+    CHECK(capture([&] { return extern_smb_list_credential(true, 0); }, &out, &err) == 0);
     CHECK(geteuid() == uid);
     CHECK(out.find(kHost) != std::string::npos && out.find(host2) != std::string::npos);
     CHECK(capture(clear, &out, &err) == 0);
     CHECK(geteuid() == uid && err.find("refusing") == std::string::npos);
     CHECK(trusted(snap(path), uid) && !snap(cache_path(uid)).exists);
-    CHECK(capture([&] { return extern_smb_list_credential(false); }, &out, &err) == 0);
+    CHECK(capture([&] { return extern_smb_list_credential(false, 0); }, &out, &err) == 0);
     CHECK(out.find(kHost) == std::string::npos && out.find(host2) != std::string::npos);
 
     // An existing 0600 cache is used.
@@ -604,6 +628,131 @@ static void custom_cache_config(uid_t uid, mode_t dir_mode) {
     CHECK(capture(clear, &out, &err) == 0);
 
     g_config_path = saved_config;
+}
+
+
+// Legacy callers keep KRB5_CC_NAME verbatim; per-identity callers get
+// krb5cc_<uid> in its directory, and non-FILE or relative names are refused.
+static void ccache_name_resolution() {
+    std::string dir = new_case("ccache-name");
+    std::string name, out, err;
+    const uid_t uid = 4000123;
+
+    CHECK(resolve_ccache_name(uid, false, &name) == 0 && name == default_ccache_name(uid));
+    CHECK(resolve_ccache_name(uid, true, &name) == 0 && name == default_ccache_name(uid));
+
+    const char* saved = use_config(dir, "KRB5_CC_NAME: " + dir + "/custom_cache\n");
+    CHECK(resolve_ccache_name(uid, false, &name) == 0 && name == dir + "/custom_cache");
+    CHECK(resolve_ccache_name(uid, true, &name) == 0 && name == "FILE:" + dir + "/krb5cc_" + std::to_string(uid));
+
+    use_config(dir, "KRB5_CC_NAME: FILE:" + dir + "/krb5cc_0\n");
+    CHECK(resolve_ccache_name(0, false, &name) == 0 && name == "FILE:" + dir + "/krb5cc_0");
+    CHECK(resolve_ccache_name(uid, true, &name) == 0 && name == "FILE:" + dir + "/krb5cc_" + std::to_string(uid));
+
+    for (const char* bad : {"KEYRING:persistent:0", "KCM:", "DIR:/run/krb5cc", "krb5cc_relative", "FILE:rel/krb5cc"}) {
+        use_config(dir, std::string("KRB5_CC_NAME: \"") + bad + "\"\n");
+        CHECK(resolve_ccache_name(uid, false, &name) == 0 && name == bad);
+        CHECK(capture([&] { return resolve_ccache_name(uid, true, &name); }, &out, &err) == -1);
+        CHECK(err.find("not an absolute FILE cache") != std::string::npos);
+    }
+    g_config_path = saved;
+}
+
+// A per-identity set owns and reuses krb5cc_<uid> without tripping the owner
+// check in its internal clear, and per-identity clear removes only that entry.
+static void per_identity_flow(uid_t uid) {
+    new_case("per-identity");
+    std::string path = cache_path(uid), out, err;
+    std::string host2 = "two.file.core.windows.net", k1 = key32("PI-ONE"), k2 = key32("PI-TWO");
+
+    CHECK(capture([&] { return op_set_pi(uid, kHost, k1); }, &out, &err) == 0);
+    CHECK(err.find("refusing") == std::string::npos);
+    Snap first = snap(path);
+    CHECK(trusted(first, uid) && count(first.data, k1) >= 1);
+    CHECK(capture([&] { return op_set_pi(uid, host2, k2); }, &out, &err) == 0);
+    Snap second = snap(path);
+    CHECK(trusted(second, uid) && second.ino == first.ino && count(second.data, k2) >= 1);
+    CHECK(capture([&] { return op_clear_pi(uid, kHost); }, &out, &err) == 0);
+    CHECK(err.find("refusing") == std::string::npos);
+    CHECK(trusted(snap(path), uid));
+}
+
+// A per-identity cache that cannot be handed to its uid is removed rather than
+// left behind wrongly owned (which check_ccache_file would refuse forever), and
+// (uid_t)-1 is never accepted as a cache uid.
+static void per_identity_failure_cleanup() {
+    new_case("per-identity-cleanup");
+    std::string out, err;
+    unsigned int bad = static_cast<unsigned int>(static_cast<uid_t>(-1));
+    unsigned int expires = 0;
+    char uri[] = "https://one.file.core.windows.net";
+    char token[] = "unused";
+    CHECK(extern_smb_set_credential_oauth_token(uri, token, &expires, bad) == -1);
+    CHECK(capture([&] { return extern_smb_list_credential(false, bad); }, &out, &err) == -1);
+    if (geteuid() == 0) {
+        return; // root can chown to any uid; the failure path is unreachable
+    }
+    uid_t other = geteuid() + 1;
+    std::string path = cache_path(other);
+    CHECK(capture([&] { return op_set_pi(other, kHost, key32("PI-CLEANUP")); }, &out, &err) != 0);
+    CHECK(!snap(path).exists);
+}
+
+// ensure_passwd_entry adds one inert, newline-safe entry per uid, accepts an
+// existing uid, skips root, and never creates a missing passwd file.
+static void passwd_provisioning() {
+    std::string dir = new_case("passwd");
+    std::string pw = dir + "/passwd";
+    CHECK(write_file(pw, "root:x:0:0:root:/root:/bin/bash\nreal:x:4000200:4000200::/home/real:/bin/sh", 0644));
+    const char* saved = use_config(dir, "PASSWD_FILE: " + pw + "\n");
+
+    CHECK(ensure_passwd_entry(0) == 0);
+    CHECK(ensure_passwd_entry(4000200) == 0);
+    CHECK(read_file(pw).find("azfiles") == std::string::npos);
+
+    CHECK(ensure_passwd_entry(4000123) == 0);
+    CHECK(ensure_passwd_entry(4000123) == 0);
+    std::string data = read_file(pw);
+    CHECK(data.find("/bin/sh\nazfiles4000123:x:4000123:4000123:") != std::string::npos);
+    CHECK(count(data, "azfiles4000123:") == 1);
+    CHECK(data.find(":/nonexistent:/usr/sbin/nologin\n") != std::string::npos);
+    CHECK(data.back() == '\n');
+
+    // An already-present uid is answered from a read-only scan without taking
+    // the passwd lock (ticket refreshers may not be able to write /etc).
+    std::string lock = dir + "/.pwd.lock";
+    unlink(lock.c_str());
+    CHECK(mkdir(lock.c_str(), 0700) == 0);
+    CHECK(ensure_passwd_entry(4000123) == 0);
+    CHECK(ensure_passwd_entry(4000200) == 0);
+    CHECK(ensure_passwd_entry(4000124) == -1);
+    CHECK(count(read_file(pw), "azfiles4000124:") == 0);
+    CHECK(rmdir(lock.c_str()) == 0);
+
+    std::string missing = dir + "/absent/passwd";
+    CHECK(mkdir((dir + "/absent").c_str(), 0755) == 0);
+    use_config(dir, "PASSWD_FILE: " + missing + "\n");
+    CHECK(ensure_passwd_entry(4000123) == -1);
+    CHECK(!snap(missing).exists);
+    g_config_path = saved;
+}
+
+// A non-root USER_UID cannot own or read another uid's 0600 cache, so a
+// different per-identity cache_uid is rejected before passwd is written.
+static void per_identity_requires_root_user_uid() {
+    std::string dir = new_case("pi-nonroot-user");
+    std::string pw = dir + "/passwd";
+    CHECK(write_file(pw, "root:x:0:0:root:/root:/bin/bash\n", 0644));
+    const char* saved = use_config(dir, "USER_UID: 4000300\nKRB5_CC_NAME: " + dir + "/krb5cc_0\nPASSWD_FILE: " + pw + "\n");
+    unsigned int expires = 0;
+    char uri[] = "https://one.file.core.windows.net";
+    char token[] = "unused";
+    std::string out, err;
+    CHECK(extern_smb_set_credential_oauth_token(uri, token, &expires, 4000301) == -1);
+    CHECK(capture([&] { return extern_smb_list_credential(false, 4000301); }, &out, &err) == -1);
+    CHECK(read_file(pw).find("azfiles") == std::string::npos);
+    CHECK(!snap(dir + "/krb5cc_4000301").exists);
+    g_config_path = saved;
 }
 
 #ifndef CCACHE_SELFTEST_ROOT
@@ -749,6 +898,33 @@ static void exclusive_create_boundaries() {
             }
         }
     }
+}
+
+// Two identities on one node get separate caches, each owned by its uid with
+// only its own tickets; listing and clearing one never touches the other.
+static void per_identity_isolation() {
+    std::string dir = new_case("pi-isolation");
+    std::string host2 = "two.file.core.windows.net", out, err;
+    std::string ko = key32("PI-OWNER"), kx = key32("PI-OTHER");
+    const char* saved = use_config(dir, "USER_UID: 0\n");
+
+    CHECK(capture([&] { return op_set_pi(kOwnerUid, kHost, ko); }, &out, &err) == 0);
+    CHECK(capture([&] { return op_set_pi(kOtherUid, host2, kx); }, &out, &err) == 0);
+    CHECK(err.find("refusing") == std::string::npos);
+    Snap owner = snap(cache_path(kOwnerUid)), other = snap(cache_path(kOtherUid));
+    CHECK(trusted(owner, kOwnerUid) && count(owner.data, ko) >= 1 && count(owner.data, kx) == 0);
+    CHECK(trusted(other, kOtherUid) && count(other.data, kx) >= 1 && count(other.data, ko) == 0);
+    CHECK(!snap(cache_path(0)).exists);
+
+    CHECK(capture([&] { return extern_smb_list_credential(false, kOwnerUid); }, &out, &err) == 0);
+    CHECK(geteuid() == 0);
+    CHECK(out.find(kHost) != std::string::npos && out.find(host2) == std::string::npos);
+    CHECK(capture([&] { return extern_smb_list_credential(false, kOtherUid); }, &out, &err) == 0);
+    CHECK(out.find(host2) != std::string::npos && out.find(kHost) == std::string::npos);
+
+    CHECK(capture([&] { return op_clear_pi(kOwnerUid, kHost); }, &out, &err) == 0);
+    CHECK(same(other, snap(cache_path(kOtherUid))));
+    g_config_path = saved;
 }
 
 // Root in a user namespace (e.g. a rootless build container) may be unable to
@@ -910,12 +1086,20 @@ int main(int argc, char**) {
     custom_cache_config(0, 0700);
     exclusive_create_boundaries();
     create_race();
+    per_identity_isolation();
+    per_identity_flow(kOwnerUid);
+    per_identity_requires_root_user_uid();
 #else
     helper_matrix();
     normal_flow(geteuid());
     refusal_matrix(geteuid(), geteuid());
     custom_cache_config(geteuid(), 0755);
     custom_cache_config(geteuid(), 0700);
+    ccache_name_resolution();
+    per_identity_flow(geteuid());
+    per_identity_failure_cleanup();
+    passwd_provisioning();
+    per_identity_requires_root_user_uid();
 #endif
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
 

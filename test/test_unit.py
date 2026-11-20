@@ -138,6 +138,7 @@ def _load_refresh():
     fake_azfilesauth.azfiles_set_oauth = mock.MagicMock()
     fake_azfilesauth.get_oauth_token = mock.MagicMock(return_value="fake-token-123")
     fake_azfilesauth.init_new_user = mock.MagicMock()
+    fake_azfilesauth.load_config = mock.MagicMock(return_value={})
 
     pre_patch = {"azfilesauth": fake_azfilesauth}
 
@@ -623,13 +624,19 @@ class TestAzfilesList(unittest.TestCase):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
         mod.azfiles_list(False)
-        fake_lib.extern_smb_list_credential.assert_called_once_with(False)
+        self.assertEqual(fake_lib.extern_smb_list_credential.call_count, 1)
+        args = fake_lib.extern_smb_list_credential.call_args[0]
+        self.assertEqual(args[0], False)
+        self.assertEqual(args[1].value, 0)
 
     def test_list_json(self):
         fake_lib = _make_fake_lib()
         mod = _load_manager(fake_lib)
         mod.azfiles_list(True)
-        fake_lib.extern_smb_list_credential.assert_called_once_with(True)
+        self.assertEqual(fake_lib.extern_smb_list_credential.call_count, 1)
+        args = fake_lib.extern_smb_list_credential.call_args[0]
+        self.assertEqual(args[0], True)
+        self.assertEqual(args[1].value, 0)
 
     def test_list_nonzero_rc_exits(self):
         fake_lib = _make_fake_lib()
@@ -639,6 +646,19 @@ class TestAzfilesList(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             mod.azfiles_list(False)
         self.assertEqual(ctx.exception.code, 2)
+
+
+class TestParseCacheUid(unittest.TestCase):
+
+    def test_parse_cache_uid(self):
+        mod = _load_manager(_make_fake_lib())
+        argv = ["azfilesauthmanager", "list", "--cache-uid", "4294967294"]
+        self.assertEqual(mod.parse_cache_uid(argv), 4294967294)
+        self.assertEqual(argv, ["azfilesauthmanager", "list"])
+        self.assertEqual(mod.parse_cache_uid(["azfilesauthmanager", "list"]), 0)
+        for bad in ("4294967295", "-1", "abc"):
+            with self.assertRaises(SystemExit):
+                mod.parse_cache_uid(["azfilesauthmanager", "list", "--cache-uid", bad])
 
 
 # ===================================================================
@@ -776,10 +796,11 @@ class TestGetMountOptions(unittest.TestCase):
         )
 
         id_map = self.mod.get_mount_options()
-        # Only the krb5 mount should be included
-        self.assertIn("myaccount.file.core.windows.net", id_map)
-        self.assertEqual(id_map["myaccount.file.core.windows.net"], "adb3f02b-6844-1234-8ddd-abcdef123456")
-        self.assertNotIn("other.file.core.windows.net", id_map)
+        # Only the krb5 mount should be included. Keys are (endpoint, cruid);
+        # this mount line carries no cruid= so it defaults to 0.
+        self.assertIn(("myaccount.file.core.windows.net", 0), id_map)
+        self.assertEqual(id_map[("myaccount.file.core.windows.net", 0)], "adb3f02b-6844-1234-8ddd-abcdef123456")
+        self.assertNotIn(("other.file.core.windows.net", 0), id_map)
 
     @mock.patch("subprocess.run")
     def test_root_username_detected(self, mock_run):
@@ -793,13 +814,33 @@ class TestGetMountOptions(unittest.TestCase):
         )
 
         id_map = self.mod.get_mount_options()
-        self.assertEqual(id_map["sys.file.core.windows.net"], "root")
+        self.assertEqual(id_map[("sys.file.core.windows.net", 0)], "root")
 
     @mock.patch("subprocess.run")
     def test_no_cifs_mounts_returns_empty(self, mock_run):
         mock_run.return_value = mock.MagicMock(stdout=b"", stderr=b"")
         id_map = self.mod.get_mount_options()
         self.assertEqual(id_map, {})
+
+    @mock.patch("subprocess.run")
+    def test_private_endpoint_is_canonicalized(self, mock_run):
+        # A private-endpoint mount source keeps the privatelink FQDN, but the
+        # Kerberos ticket principal uses the canonical <account>.file.<suffix>.
+        # get_mount_options must canonicalize the key so the ticket lookup matches.
+        mount_output = (
+            "//myaccount.privatelink.file.core.windows.net/share on /mnt type cifs "
+            "(rw,sec=krb5,username=my-client-id,cruid=2000123,uid=0)\n"
+        )
+        mock_run.return_value = mock.MagicMock(
+            stdout=mount_output.encode("utf-8"),
+            stderr=b"",
+        )
+
+        id_map = self.mod.get_mount_options()
+        # Keyed by the canonical endpoint (matching the ticket principal), not privatelink.
+        self.assertIn(("myaccount.file.core.windows.net", 2000123), id_map)
+        self.assertNotIn(("myaccount.privatelink.file.core.windows.net", 2000123), id_map)
+        self.assertEqual(id_map[("myaccount.file.core.windows.net", 2000123)], "my-client-id")
 
 
 # ===================================================================
@@ -832,7 +873,7 @@ class TestRefreshTicket(unittest.TestCase):
         # Should call get_oauth_token with no args (system MI)
         self.mod._fake_azfilesauth.get_oauth_token.assert_called_once_with()
         self.mod._fake_azfilesauth.azfiles_set_oauth.assert_called_once_with(
-            "https://account.file.core.windows.net", "system-token"
+            "https://account.file.core.windows.net", "system-token", cache_uid=0
         )
 
     @mock.patch("subprocess.run")
@@ -993,6 +1034,26 @@ class TestGetTickets(unittest.TestCase):
 # Test: azfilesrefresh.py.in — start_daemon orchestration loop
 # ===================================================================
 
+class TestGetKerberosDir(unittest.TestCase):
+    """get_kerberos_dir() must resolve KRB5_CC_NAME via the shared YAML loader."""
+
+    def setUp(self):
+        self.mod = _load_refresh()
+
+    def _dir_for(self, config):
+        with mock.patch.object(self.mod, "load_config", return_value=config):
+            return self.mod.get_kerberos_dir()
+
+    def test_quoted_file_prefix(self):
+        self.assertEqual(self._dir_for({"KRB5_CC_NAME": "FILE:/var/krb/krb5cc_0"}), "/var/krb")
+
+    def test_missing_or_invalid_falls_back(self):
+        self.assertEqual(self._dir_for({}), "/tmp")
+        self.assertEqual(self._dir_for({"KRB5_CC_NAME": "krb5cc_0"}), "/tmp")
+        with mock.patch.object(self.mod, "load_config", side_effect=OSError("nope")):
+            self.assertEqual(self.mod.get_kerberos_dir(), "/tmp")
+
+
 class TestStartDaemon(unittest.TestCase):
     """Verify start_daemon() ties get_tickets, is_expiring, and refresh_ticket
     together correctly."""
@@ -1008,6 +1069,7 @@ class TestStartDaemon(unittest.TestCase):
             self.mod.RUNNING = False
 
         with mock.patch.object(self.mod, "get_tickets", return_value=tickets), \
+             mock.patch.object(self.mod, "get_cache_uids", return_value={0}), \
              mock.patch.object(self.mod, "refresh_ticket") as mock_refresh, \
              mock.patch.object(self.mod, "init_new_user"), \
              mock.patch("time.sleep", side_effect=_stop_loop):
@@ -1031,7 +1093,7 @@ class TestStartDaemon(unittest.TestCase):
 
         mock_refresh = self._run_one_iteration([ticket_a, ticket_b, ticket_c])
 
-        mock_refresh.assert_called_once_with(ticket_b)
+        mock_refresh.assert_called_once_with(ticket_b, 0)
 
     def test_no_tickets_means_no_refresh(self):
         """Empty ticket list should not call refresh_ticket at all."""
@@ -1050,8 +1112,8 @@ class TestStartDaemon(unittest.TestCase):
         mock_refresh = self._run_one_iteration([ticket_x, ticket_y])
 
         self.assertEqual(mock_refresh.call_count, 2)
-        mock_refresh.assert_any_call(ticket_x)
-        mock_refresh.assert_any_call(ticket_y)
+        mock_refresh.assert_any_call(ticket_x, 0)
+        mock_refresh.assert_any_call(ticket_y, 0)
 
     def test_no_expiring_tickets_skips_refresh(self):
         """When no tickets are near expiry, refresh_ticket is never called."""

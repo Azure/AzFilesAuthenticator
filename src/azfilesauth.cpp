@@ -8,6 +8,7 @@
 #include <yaml.h>
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include "azfilesauth.h"
 #include <unistd.h>
 #include <syslog.h>
@@ -17,6 +18,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <cstdlib>
 
 
 // ---- Lightweight logging wrapper ----
@@ -236,7 +238,7 @@ static void az_syslog(int priority, const char* format, ...) {
 // Macro override so all existing syslog(...) calls route through az_syslog
 #define syslog az_syslog
 
-int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid);
+int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid, bool per_identity = false);
 
 // Directory of the default credential cache (test hook).
 static const char* g_ccache_dir = "/tmp";
@@ -331,6 +333,272 @@ std::string read_config_value(const std::string& key) {
 
     closelog();
     return value;
+}
+
+// Resolves the credential cache name for uid into *out. Returns 0, or -1
+// (logged) to refuse.
+//
+// Legacy callers (per_identity == false) get exactly the historical behavior:
+// the configured KRB5_CC_NAME verbatim, or the default FILE cache for uid.
+//
+// Per-identity callers (a non-zero cache_uid from the CSI driver) get
+// FILE:<dir>/krb5cc_<uid>, where <dir> is the directory of the configured
+// KRB5_CC_NAME (or the default cache directory). This matches the cache name
+// cifs.upcall derives for cruid=<uid>, so each identity gets its own cache
+// instead of sharing one. Only FILE caches at absolute paths can be split per
+// identity; any other configured cache type is refused rather than guessed at.
+static int resolve_ccache_name(uid_t uid, bool per_identity, std::string* out) {
+    std::string configured = read_config_value("KRB5_CC_NAME");
+    openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
+
+    if (configured.empty()) {
+        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
+        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", uid);
+        *out = default_ccache_name(uid);
+        return 0;
+    }
+    if (!per_identity) {
+        *out = configured;
+        return 0;
+    }
+
+    std::string path = configured;
+    if (path.compare(0, 5, "FILE:") == 0) {
+        path.erase(0, 5);
+    }
+    if (path.empty() || path[0] != '/') {
+        syslog(LOG_ERR, "KRB5_CC_NAME %s is not an absolute FILE cache; per-identity cache for uid %d "
+               "is unsupported", configured.c_str(), uid);
+        std::fprintf(stderr, "azfilesauth: KRB5_CC_NAME %s is not an absolute FILE cache; per-identity "
+                     "credential caches require one\n", configured.c_str());
+        return -1;
+    }
+    *out = "FILE:" + path.substr(0, path.find_last_of('/')) + "/krb5cc_" + std::to_string(uid);
+    return 0;
+}
+
+// --- Native per-identity passwd provisioning -------------------------------
+// cifs.upcall (running in the host mount namespace) calls getpwuid(cruid) before
+// it reads krb5cc_<cruid>. For cruid 0 (root) that always resolves, which is why
+// the legacy shared-cache path never needed a passwd entry. For a per-identity
+// non-zero cruid the host passwd file must contain a matching entry or the mount
+// fails. We provision an inert stand-in entry here so callers do not need to
+// manage passwd themselves.
+static const char* SYNTHETIC_PASSWD_PREFIX = "azfiles";
+static const char* SYNTHETIC_PASSWD_GECOS  = "AzureFiles Kerberos per-identity credential cache";
+static const char* SYNTHETIC_PASSWD_SHELL  = "/usr/sbin/nologin";
+static const char* SYNTHETIC_PASSWD_HOME   = "/nonexistent";
+static const int   MAX_SYNTHETIC_PASSWD_ENTRIES = 10000;
+static const int   PASSWD_LOCK_TIMEOUT_SEC = 15;
+static const long  PASSWD_LOCK_RETRY_NS    = 100L * 1000000L; // 100ms
+
+// Returns the passwd file to provision. Defaults to /etc/passwd, but can be
+// pointed at the host passwd (e.g. /host/etc/passwd) via the PASSWD_FILE config
+// key when azfilesauth runs inside a container whose own /etc is not the host's
+// (cifs.upcall runs in the host mount namespace and resolves against host NSS).
+static std::string passwd_file_path() {
+    std::string p = read_config_value("PASSWD_FILE");
+    return p.empty() ? std::string("/etc/passwd") : p;
+}
+
+// Takes an exclusive, bounded fcntl (POSIX record) lock on <passwd_dir>/.pwd.lock.
+// This is the same lock file and locking mechanism shadow-utils / lckpwdf(3) use,
+// so it coordinates with concurrent useradd/usermod on the host. (flock(2) is a
+// separate lock space on Linux and would NOT coordinate, so we must use fcntl.)
+// Returns an open, locked fd (caller closes to release) or -1 on error/timeout.
+static int lock_passwd(const std::string& passwd_path) {
+    std::string dir = get_parent_dir(passwd_path);
+    if (dir.empty()) {
+        dir = ".";
+    }
+    std::string lock_path = dir + "/.pwd.lock";
+    int fd = open(lock_path.c_str(), O_WRONLY | O_CREAT, 0600);
+    if (fd < 0) {
+        syslog(LOG_ERR, "ensure_passwd_entry: cannot open lock file %s: %s", lock_path.c_str(), strerror(errno));
+        return -1;
+    }
+
+    struct flock lk;
+    memset(&lk, 0, sizeof(lk));
+    lk.l_type = F_WRLCK;
+    lk.l_whence = SEEK_SET;
+
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec += PASSWD_LOCK_TIMEOUT_SEC;
+
+    for (;;) {
+        if (fcntl(fd, F_SETLK, &lk) == 0) {
+            return fd;
+        }
+        if (errno != EAGAIN && errno != EACCES && errno != EINTR) {
+            syslog(LOG_ERR, "ensure_passwd_entry: lock error on %s: %s", lock_path.c_str(), strerror(errno));
+            close(fd);
+            return -1;
+        }
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec > deadline.tv_sec ||
+            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+            syslog(LOG_ERR, "ensure_passwd_entry: timed out after %ds waiting for %s",
+                   PASSWD_LOCK_TIMEOUT_SEC, lock_path.c_str());
+            close(fd);
+            return -1;
+        }
+        struct timespec retry = {0, PASSWD_LOCK_RETRY_NS};
+        nanosleep(&retry, nullptr);
+    }
+}
+
+// Scans `passwd_path` for an entry whose uid field equals `uid` and counts the
+// entries carrying the synthetic name prefix. Returns 0 on success or -1 if the file is unreadable.
+static int scan_passwd(const std::string& passwd_path, uid_t uid, bool* exists, int* synthetic_count) {
+    *exists = false;
+    *synthetic_count = 0;
+    std::ifstream pf(passwd_path);
+    if (!pf.is_open()) {
+        syslog(LOG_ERR, "ensure_passwd_entry: cannot read %s: %s", passwd_path.c_str(), strerror(errno));
+        return -1;
+    }
+    std::string line;
+    while (std::getline(pf, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        // The uid is the 3rd colon-delimited field (index 2).
+        size_t p1 = line.find(':');
+        if (p1 == std::string::npos) continue;
+        size_t p2 = line.find(':', p1 + 1);
+        if (p2 == std::string::npos) continue;
+        size_t p3 = line.find(':', p2 + 1);
+        if (p3 == std::string::npos) continue;
+        std::string uid_field = line.substr(p2 + 1, p3 - (p2 + 1));
+        errno = 0;
+        char* endp = nullptr;
+        unsigned long parsed = strtoul(uid_field.c_str(), &endp, 10);
+        if (endp != uid_field.c_str() && *endp == '\0' && errno == 0 &&
+            parsed == static_cast<unsigned long>(uid)) {
+            *exists = true;
+            return 0;
+        }
+        if (line.compare(0, strlen(SYNTHETIC_PASSWD_PREFIX), SYNTHETIC_PASSWD_PREFIX) == 0) {
+            (*synthetic_count)++;
+        }
+    }
+    return 0;
+}
+
+// Ensures the passwd file contains an entry for `uid` so cifs.upcall's mandatory
+// getpwuid(cruid) resolves before it reads krb5cc_<cruid>. The entry is inert
+// (nologin shell, non-existent home); a pre-existing uid
+// (including one we did not create, e.g. a real account) is accepted as a valid
+// stand-in. Idempotent, bounded, and host-coordinated via lock_passwd(). Returns
+// 0 on success (entry present or added) or -1 on error.
+static int ensure_passwd_entry(uid_t uid) {
+    if (uid == 0) {
+        return 0; // root always resolves via getpwuid(0)
+    }
+    std::string passwd_path = passwd_file_path();
+
+    // Fast path: an already-provisioned uid (e.g. every ticket refresh) needs
+    // only read access and never takes the host passwd lock.
+    bool exists = false;
+    int synthetic_count = 0;
+    if (scan_passwd(passwd_path, uid, &exists, &synthetic_count) != 0) {
+        return -1;
+    }
+    if (exists) {
+        return 0;
+    }
+
+    int lock_fd = lock_passwd(passwd_path);
+    if (lock_fd < 0) {
+        return -1;
+    }
+    // Re-check under the lock: a concurrent caller may have added it.
+    if (scan_passwd(passwd_path, uid, &exists, &synthetic_count) != 0) {
+        close(lock_fd);
+        return -1;
+    }
+
+    int result = 0;
+    if (!exists) {
+        if (synthetic_count >= MAX_SYNTHETIC_PASSWD_ENTRIES) {
+            syslog(LOG_ERR, "ensure_passwd_entry: synthetic entry cap (%d) reached, refusing to add uid %u",
+                   MAX_SYNTHETIC_PASSWD_ENTRIES, uid);
+            result = -1;
+        } else {
+            int fd = open(passwd_path.c_str(), O_RDWR | O_APPEND | O_CLOEXEC);
+            if (fd < 0) {
+                syslog(LOG_ERR, "ensure_passwd_entry: cannot open %s: %s", passwd_path.c_str(), strerror(errno));
+                result = -1;
+            } else {
+                // Keep passwd well-formed: if the file does not already end in a
+                // newline, prepend one so we never splice onto an existing line.
+                std::string prefix;
+                off_t end = lseek(fd, 0, SEEK_END);
+                if (end > 0) {
+                    char last = '\n';
+                    if (pread(fd, &last, 1, end - 1) != 1) {
+                        syslog(LOG_ERR, "ensure_passwd_entry: cannot read %s: %s", passwd_path.c_str(), strerror(errno));
+                        close(fd);
+                        close(lock_fd);
+                        return -1;
+                    }
+                    if (last != '\n') {
+                        prefix = "\n";
+                    }
+                }
+                std::ostringstream entry;
+                entry << prefix
+                      << SYNTHETIC_PASSWD_PREFIX << uid << ":x:" << uid << ":" << uid
+                      << ":" << SYNTHETIC_PASSWD_GECOS
+                      << ":" << SYNTHETIC_PASSWD_HOME
+                      << ":" << SYNTHETIC_PASSWD_SHELL << "\n";
+                std::string s = entry.str();
+                ssize_t written = write(fd, s.c_str(), s.size());
+                if (written != static_cast<ssize_t>(s.size())) {
+                    syslog(LOG_ERR, "ensure_passwd_entry: short write to %s: %s", passwd_path.c_str(), strerror(errno));
+                    result = -1;
+                } else if (fsync(fd) != 0) {
+                    syslog(LOG_ERR, "ensure_passwd_entry: fsync %s failed: %s", passwd_path.c_str(), strerror(errno));
+                    result = -1;
+                } else {
+                    syslog(LOG_INFO, "ensure_passwd_entry: added inert passwd entry for cruid %u", uid);
+                }
+                close(fd);
+            }
+        }
+    }
+
+    close(lock_fd); // releasing the fd drops the fcntl lock
+    return result;
+}
+// ---------------------------------------------------------------------------
+
+// Strip an optional krb5 TYPE: prefix (only FILE: is supported) to obtain the
+// filesystem path of a credential cache, for chown/chmod operations.
+static std::string krb5_cc_fs_path(const std::string& cc_name) {
+    if (cc_name.compare(0, 5, "FILE:") == 0) {
+        return cc_name.substr(5);
+    }
+    return cc_name;
+}
+
+// Hands a newly initialized per-identity cache to its cache uid with mode 0600.
+// cifs.upcall reads krb5cc_<cruid> as the cruid, and check_ccache_file requires
+// that owner on every later use, so a failure here is returned as an error.
+static int set_ccache_owner(const std::string& cc_name, uid_t uid) {
+    std::string path = krb5_cc_fs_path(cc_name);
+    if (chown(path.c_str(), uid, static_cast<gid_t>(-1)) != 0) {
+        syslog(LOG_ERR, "Failed to chown credential cache %s to uid %d: %s", path.c_str(), uid, strerror(errno));
+        return -1;
+    }
+    if (chmod(path.c_str(), S_IRUSR | S_IWUSR) != 0) {
+        syslog(LOG_ERR, "Failed to chmod credential cache %s to 0600: %s", path.c_str(), strerror(errno));
+        return -1;
+    }
+    return 0;
 }
 
 std::string parse_principal_into_string(const krb5_principal principal) {
@@ -644,7 +912,7 @@ int get_kerberos_service_ticket(const std::string& resource_uri,
 
 // Inserts a Kerberos credential into the credential cache.
 int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_ticket_data,
-		size_t krb_ticket_size, uid_t user_uid) {
+		size_t krb_ticket_size, uid_t user_uid, bool per_identity = false) {
     krb5_context context = NULL;
     krb5_error_code ret;
     krb5_auth_context auth_context = NULL;
@@ -652,24 +920,16 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     krb5_creds **decoded_cred = NULL, *creds;
     krb5_ccache cache;
     krb5_principal existing_principal;
-    std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* cache_name;
     const char* KRB5_CC_NAME;
     bool cache_exists = false;
 
-    // Use read_config_value to get the value of KRB5_CC_NAME
-    krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
-
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
-    if (krb5_cc_name_str.empty()) {
-        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
-        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
-        krb5_cc_name_construct = default_ccache_name(user_uid);
-    } else {
-        krb5_cc_name_construct = krb5_cc_name_str;
+    if (resolve_ccache_name(user_uid, per_identity, &krb5_cc_name_construct) != 0) {
+        goto out;
     }
     KRB5_CC_NAME = krb5_cc_name_construct.c_str();
     
@@ -736,6 +996,14 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
             syslog(LOG_ERR, "Failed to initialize credential cache: %s", krb5_get_error_message(context, ret2));
             goto out;
         }
+        // krb5_cc_initialize recreates the file as the caller (root in
+        // production); per-identity caches must belong to their cache uid.
+        // On failure remove the file so check_ccache_file does not refuse
+        // this identity forever over a wrongly-owned leftover.
+        if (per_identity && set_ccache_owner(krb5_cc_name_construct, user_uid) != 0) {
+            unlink(krb5_cc_fs_path(krb5_cc_name_construct).c_str());
+            goto out;
+        }
     } else {
         syslog(LOG_ERR, "Failed to get principal from credential cache: %s", krb5_get_error_message(context, ret));
         goto out;
@@ -751,7 +1019,7 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
     }
 
     //clear credentials from cache before inserting new one for same file uri
-    smb_clear_credential(file_endpoint_uri, user_uid);
+    smb_clear_credential(file_endpoint_uri, user_uid, per_identity);
     // Process the decoded credentials
     for (int i = 0; decoded_cred[i] != NULL; i++) {
         syslog(LOG_INFO, "Ticket %d:", i);
@@ -804,7 +1072,8 @@ int smb_insert_credential(const std::string& file_endpoint_uri, const char* krb_
 int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
                         const std::string& oauth_token,
                         unsigned int* credential_expires_in_seconds,
-                        uid_t user_uid) 
+                        uid_t user_uid,
+                        bool per_identity = false)
 {
     std::string expiration;
     std::string session_key;
@@ -852,7 +1121,7 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
     decoded_pair = decodeBase64(krb_ticket);
     decoded = decoded_pair.first;
     size = decoded_pair.second;
-    rc = smb_insert_credential(file_endpoint_uri, decoded.c_str(), size, user_uid);
+    rc = smb_insert_credential(file_endpoint_uri, decoded.c_str(), size, user_uid, per_identity);
 
     syslog(LOG_INFO, "insert credential rc: %d", rc);
 
@@ -894,13 +1163,12 @@ int smb_set_credential_oauth_token(const std::string& file_endpoint_uri,
         return -1;
 }
 
-int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
+int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid, bool per_identity) {
     krb5_context context = NULL;
     krb5_ccache ccache = NULL;
     krb5_principal principal = NULL;
     krb5_error_code krb_rc;
     krb5_creds creds;
-    std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* KRB5_CC_NAME;
     krb5_principal cache_principal = NULL;
@@ -918,20 +1186,13 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
         return -1;
     }
 
-    // Use read_config_value to get the value of KRB5_CC_NAME
-    krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
-
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
     syslog(LOG_INFO,"Clear credential for %s", endpoint_uri_str.c_str());
 
-    if (krb5_cc_name_str.empty()) {
-        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
-        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
-        krb5_cc_name_construct = default_ccache_name(user_uid);
-    } else {
-        krb5_cc_name_construct = krb5_cc_name_str;
+    if (resolve_ccache_name(user_uid, per_identity, &krb5_cc_name_construct) != 0) {
+        goto out;
     }
     KRB5_CC_NAME = krb5_cc_name_construct.c_str();
 
@@ -1020,7 +1281,7 @@ int smb_clear_credential(const std::string& file_endpoint_uri, uid_t user_uid) {
 }
 
 // List the credentials in the credential cache from KRB5_CC_NAME
-void smb_list_credential(bool is_json, uid_t user_uid) {
+void smb_list_credential(bool is_json, uid_t user_uid, bool per_identity = false) {
     krb5_context context = NULL;
     krb5_ccache ccache;
     krb5_error_code krb_rc;
@@ -1029,7 +1290,6 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     int count = 0;
     std::ostringstream json_output;
     bool first = true;
-    std::string krb5_cc_name_str;
     std::string krb5_cc_name_construct;
     const char* KRB5_CC_NAME;
     char *server_name = NULL;
@@ -1042,18 +1302,11 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     char end_local[64] = "N/A";
     struct tm tm_local;
 
-    // Use read_config_value to get the value of KRB5_CC_NAME
-    krb5_cc_name_str = read_config_value("KRB5_CC_NAME");
-
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
 
-    if (krb5_cc_name_str.empty()) {
-        syslog(LOG_INFO, "Failed to read KRB5_CC_NAME from config file at %s", CONFIG_FILE_PATH);
-        syslog(LOG_INFO, "Defaulting to default ccache for azfilesuser with UID: %d", user_uid);
-        krb5_cc_name_construct = default_ccache_name(user_uid);
-    } else {
-        krb5_cc_name_construct = krb5_cc_name_str;
+    if (resolve_ccache_name(user_uid, per_identity, &krb5_cc_name_construct) != 0) {
+        goto out;
     }
     KRB5_CC_NAME = krb5_cc_name_construct.c_str();
 
@@ -1168,12 +1421,31 @@ void smb_list_credential(bool is_json, uid_t user_uid) {
     return;
 }
 
+// A per-identity cache is owned by cache_uid with mode 0600, so it can only be
+// created (chown) and later read or refreshed from a root USER_UID context. A
+// non-root USER_UID may only use its own uid; reject anything else up front,
+// before passwd is touched or a cache is created.
+static bool cache_uid_usable(unsigned int cache_uid, uid_t user_uid) {
+    if (cache_uid == 0 || user_uid == 0 || static_cast<uid_t>(cache_uid) == user_uid) {
+        return true;
+    }
+    syslog(LOG_ERR, "Per-identity cache uid %u requires USER_UID 0 (configured USER_UID is %d)", cache_uid, user_uid);
+    return false;
+}
+
 int extern_smb_set_credential_oauth_token(char* file_endpoint_uri,
                         char* oauth_token,
-                        unsigned int* credential_expires_in_seconds) 
+                        unsigned int* credential_expires_in_seconds,
+                        unsigned int cache_uid) 
 {
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
+
+    // (uid_t)-1 means "leave unchanged" to chown(2) and is never a valid owner.
+    if (static_cast<uid_t>(cache_uid) == static_cast<uid_t>(-1)) {
+        syslog(LOG_ERR, "Invalid cache uid %u", cache_uid);
+        return -1;
+    }
 
     std::string user_uid_str = read_config_value("USER_UID");
     if (user_uid_str.empty()) {
@@ -1182,13 +1454,32 @@ int extern_smb_set_credential_oauth_token(char* file_endpoint_uri,
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
+    // The privilege context for the write stays the configured USER_UID (0 in
+    // production), but the credential cache is owned by, and named after, the
+    // per-identity cache_uid passed by the driver. When cache_uid is 0 (legacy
+    // caller), fall back to USER_UID, preserving the shared krb5cc_0 behavior.
+    uid_t cache_target_uid = (cache_uid != 0) ? static_cast<uid_t>(cache_uid) : user_uid;
+    if (!cache_uid_usable(cache_uid, user_uid)) {
+        return -1;
+    }
+
+    // Provision an inert passwd entry for the per-identity cruid while still
+    // running as root (before any euid drop) so cifs.upcall's getpwuid(cruid)
+    // resolves when it reads krb5cc_<cruid>. Only for an explicit per-identity
+    // cache_uid; legacy callers never touch passwd.
+    if (cache_uid != 0 && ensure_passwd_entry(cache_target_uid) != 0) {
+        syslog(LOG_ERR, "Failed to ensure passwd entry for cruid %d", cache_target_uid);
+        return -1;
+    }
+
     uid_t prev_uid = geteuid();
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
         return -1;
     }
     
-    int rc = smb_set_credential_oauth_token(file_endpoint_uri, oauth_token, credential_expires_in_seconds, user_uid);
+    int rc = smb_set_credential_oauth_token(file_endpoint_uri, oauth_token, credential_expires_in_seconds,
+                                            cache_target_uid, cache_uid != 0);
     seteuid(prev_uid);
 
     return rc;
@@ -1225,9 +1516,15 @@ int extern_smb_clear_credential(char* file_endpoint_uri) {
     return rc;
 }
 
-int extern_smb_list_credential(bool is_json) {
+int extern_smb_list_credential(bool is_json, unsigned int cache_uid) {
     closelog();
     openlog("azfilesauth", LOG_PID | LOG_CONS, LOG_USER);
+
+    if (static_cast<uid_t>(cache_uid) == static_cast<uid_t>(-1)) {
+        syslog(LOG_ERR, "Invalid cache uid %u", cache_uid);
+        printf("Invalid cache uid %u\n", cache_uid);
+        return -1;
+    }
 
     std::string user_uid_str = read_config_value("USER_UID");
     if (user_uid_str.empty()) {
@@ -1237,6 +1534,15 @@ int extern_smb_list_credential(bool is_json) {
     }
 
     uid_t user_uid = static_cast<uid_t>(std::stoi(user_uid_str));
+    // The privilege context for the read stays the configured USER_UID (0 in
+    // production, which can read any krb5cc_<uid>), but the cache that is listed
+    // is krb5cc_<cache_uid> when a per-identity cache_uid is supplied. cache_uid
+    // 0 lists the legacy shared cache, preserving prior behavior.
+    uid_t cache_target_uid = (cache_uid != 0) ? static_cast<uid_t>(cache_uid) : user_uid;
+    if (!cache_uid_usable(cache_uid, user_uid)) {
+        printf("Per-identity cache uid %u requires USER_UID 0 (configured USER_UID is %d)\n", cache_uid, user_uid);
+        return -1;
+    }
     uid_t prev_uid = geteuid();
     if (seteuid(user_uid) != 0) {
         syslog(LOG_ERR, "Failed to switch to user UID %d: %s", user_uid, strerror(errno));
@@ -1244,7 +1550,7 @@ int extern_smb_list_credential(bool is_json) {
         return -1;
     }
 
-    smb_list_credential(is_json, user_uid);
+    smb_list_credential(is_json, cache_target_uid, cache_uid != 0);
     seteuid(prev_uid);
     return 0;
 }

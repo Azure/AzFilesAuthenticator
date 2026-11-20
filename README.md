@@ -379,6 +379,30 @@ sudo chmod 600 /etc/azfilesauth/config.yaml
 
 If `ENVIRONMENT` is omitted, Azure Identity uses the daemon's existing environment. If it is not a mapping or contains an invalid entry, token acquisition fails and the error is logged by the caller.
 
+### Configuration keys
+
+Recognized `KEY: value` entries in `/etc/azfilesauth/config.yaml` (unrecognized
+lines, including comments, are ignored):
+
+- **`KRB5_CC_NAME`** — Directory (and optional `FILE:` type prefix) for the
+  Kerberos credential caches. When a non-zero `--cache-uid` is supplied, the
+  basename is replaced with `krb5cc_<cache-uid>`, so multiple managed/workload
+  identities on the same node get their own cache instead of sharing
+  `krb5cc_0` (this requires an absolute `FILE` cache path); otherwise the
+  configured name is used as-is. Defaults to `FILE:/tmp/krb5cc_<uid>`.
+- **`USER_UID`** — Legacy single-identity uid used when no per-identity
+  `--cache-uid` is supplied. Auto-populated (`azfilesuser`) on first run.
+  A per-identity `--cache-uid` other than `USER_UID` itself requires
+  `USER_UID: 0` (as the azurefile-csi-driver configures), because its cache is
+  owned by that uid with mode `0600`; otherwise `set`/`list` fail before any
+  passwd entry or cache is created.
+- **`PASSWD_FILE`** — passwd file into which an inert stand-in entry is written
+  for each non-zero `cruid` that has no entry yet, so the host `cifs.upcall`'s `getpwuid(cruid)`
+  resolves before it reads `krb5cc_<cruid>`. Defaults to `/etc/passwd`. When
+  azfilesauth runs inside the azurefile-csi-driver container, set this to the
+  bind-mounted host passwd (e.g. `/host/etc/passwd`), because `cifs.upcall`
+  resolves against the host NSS, not the container's `/etc`.
+
 ## Security Notes
 
 - All operations performed by the Azure Files Authentication Manager tool require root privileges to ensure secure handling of authentication credentials.
