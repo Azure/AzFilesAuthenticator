@@ -11,11 +11,22 @@ This directory contains unit, static-analysis, package, lifecycle, and legacy in
 | `test_mi_lifecycle.py` | `RUN_MI_LIFECYCLE_TESTS=1 ./test/run_e2e_tests.sh` | No; opt-in | Root, installed package, Azure identity, CIFS, Kerberos, Azure resources |
 | `tests.py` | `./test/run_e2e_tests.sh` when `test/test_config.yaml` exists | No; conditional legacy path | Root, `requests`, client-secret config, mounted Azure Files share |
 | `test_package_builds.sh` | `./test/test_package_builds.sh [distros...]` | No; manual | Docker and supported distro images |
+| `test_changelog.sh` | `bash test/test_changelog.sh` | No; manual | Bash, GNU date, awk |
 | `test_open_handles.sh` | Called by the disabled stress-test code in `tests.py` | No direct invocation | Mounted share, `sudo`, `dd`, write capacity |
 | `test_signing_sort.sh` | No caller | No | Empty file; currently contains no test |
 | `list_cred_op` | Fixture/sample JSON | Not a test | None |
 
 `run_e2e_tests.sh` runs static checks and unit tests on every invocation. It marks the lifecycle and legacy suites as passed when they are skipped, so a successful runner exit does not prove those suites executed.
+
+## Changelog Tests
+
+`bash test/test_changelog.sh` tests generation, literal RPM macro escaping,
+Unreleased exclusion, history preservation, invalid-input rejection, drift
+detection, and version bumps in a temporary fixture. It does not install packages
+or change repository files.
+
+Package-container tests also query the installed RPM/DEB changelog and require
+the current package version and release notes.
 
 ## Native credential-cache selftests
 

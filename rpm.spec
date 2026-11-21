@@ -54,7 +54,7 @@ fi
 
 %files
 %license %{_licensedir}/%{name}/LICENSE
-%doc README.md
+%doc README.md CHANGELOG.md
 %{_libdir}/libazfilesauth.*
 %{_bindir}/azfilesauthmanager
 %{_bindir}/azfilesrefresh
@@ -97,5 +97,79 @@ fi
 %systemd_postun_with_restart azfilesrefresh.service
 
 %changelog
-* Thu Feb 20 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
-- Initial RPM release
+* Thu Nov 12 2026 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-13
+- Security: Validate Kerberos FILE credential cache ownership, permissions, and file type before use.
+- Security: Create missing credential cache files exclusively with mode 0600.
+- Changed: Update package signing to ESRP signing v6.
+
+* Tue Sep 08 2026 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-12
+- Added: Support Azure Identity SDK environment settings through the YAML ENVIRONMENT mapping.
+- Added: Add managed-identity lifecycle tests and configurable refresh timing for test scenarios.
+- Changed: Use the Azure Identity SDK for managed identity and workload identity token acquisition.
+- Changed: Parse configuration as YAML in both the native library and Python manager, preserving existing settings when updating USER_UID.
+- Changed: Require Python 3.8 or newer and use Python 3.11 for SLES packages.
+- Changed: Add Azure Identity, Azure Core, and PyYAML dependencies, with package post-install fallback installation.
+- Changed: Migrate build and publishing pipelines to governed OneBranch templates and an Azure Linux 3.0 publishing environment.
+- Security: Install configuration files with root-only mode 0600.
+- Fixed: Initialize native cleanup pointers and Python local variables before error paths use them.
+- Fixed: Correct RPM Python installation paths and align installed scripts with the selected interpreter.
+
+* Thu Jun 25 2026 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-11
+- Added: Support sovereign-cloud authority hosts and custom Azure Storage resources for workload identity.
+- Added: Add Ubuntu 20.04 package-test infrastructure and Ubuntu 24.04 build-pipeline coverage.
+- Changed: Temporarily disable Ubuntu 20.04 builds in the package pipeline.
+
+* Fri Mar 13 2026 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-10
+- Added: Add RHEL 10 package build and installation tests.
+- Added: Add Python unit and import tests and a pre-push test hook.
+- Added: Add shared pre-commit support for incrementing deployment build numbers.
+- Fixed: Emit an empty JSON array when credential listing produces no JSON output.
+- Fixed: Import user initialization in the refresh daemon and exclude trailing parentheses from parsed mount usernames.
+- Fixed: Prevent stale package artifacts from leaking into container-build outputs.
+- Fixed: Collect package-publishing failures and report them rather than suppressing errors.
+
+* Wed Feb 25 2026 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-9
+- Added: Add RHEL 10 package-signing key support.
+- Added: Add container-based package build and installation tests for Azure Linux, RHEL, SLES, and Ubuntu.
+- Fixed: Initialize the authentication user when starting the refresh daemon.
+- Fixed: Support the wheel group when the sudo group is unavailable on RPM-based distributions.
+- Fixed: Handle the version command without creating or updating the authentication user.
+- Fixed: Sign each package once with its matching key and restore a flat artifact layout after signing.
+- Fixed: Declare systemd RPM macro build dependencies and distribution-specific Kerberos and Python Requests dependencies.
+
+* Thu Dec 18 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-8
+- Added: Support system-assigned managed identity authentication in the CLI and refresh daemon.
+- Added: Support workload identity authentication using a federated token file.
+- Added: Add EV2-based package publishing and expand package build and signing automation.
+- Fixed: Parse service expiration timestamps, including fractional seconds, to return credential lifetime through the native API.
+- Fixed: Release the libcurl handle after a successful Kerberos ticket request.
+- Fixed: Include the generated version header in RPM packages and distribution names in Debian artifact filenames.
+
+* Mon Sep 15 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-7
+- Added: Support configurable file logging as an alternative to syslog.
+- Added: Add a version-update script to synchronize package and source version files.
+
+* Tue Sep 09 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-6
+- Notes: Historical source-version checkpoint only: configure.ac set 1.0.6 while RPM and Debian package versions remained 1.0-1.
+- Added: Add the automatic credential-refresh daemon and its systemd service.
+- Added: Add configurable HTTP connection and request timeouts.
+- Added: Report ticket start, end, and renewal times in local time and epoch form, with consistent JSON output.
+- Added: Add native and CLI version reporting and generate the installed version header.
+- Added: Add RPM packaging, package-build scripts, and build and release pipelines.
+- Changed: Consolidate public headers under the lowercase azfilesauth.h and install the generated version header.
+- Fixed: Extract the credential-cache realm when clearing service tickets instead of relying on the default Kerberos realm.
+- Fixed: Restore the effective user ID after Kerberos operations.
+- Fixed: Correct daemon user handling, Python imports, and Debian Python Requests dependencies.
+- Fixed: Restrict mount-option discovery to Kerberos-authenticated mounts.
+- Fixed: Suppress the HTTP Expect header and explicitly set an empty POST body size.
+
+* Thu May 08 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-2
+- Fixed: Request managed identity tokens for the Azure Storage resource rather than the individual file endpoint.
+- Fixed: Clear an existing credential for the same storage account before inserting its replacement.
+- Fixed: Correct credential-list output and update the documented output and test fixtures.
+
+* Mon Mar 17 2025 Ritvik Budhiraja <rbudhiraja@microsoft.com> - 1.0-1
+- Added: Introduce the native Azure Files authentication library and Python command-line manager.
+- Added: Support listing, setting, and clearing Kerberos credentials, including JSON credential listings.
+- Added: Add OAuth-token and user-assigned managed identity authentication.
+- Added: Add Autotools builds, Debian packaging, and initial integration tests.
